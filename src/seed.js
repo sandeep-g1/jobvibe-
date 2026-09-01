@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ADAPTERS } from './adapters/index.js';
-import { getDB, upsertCompany, ROOT, now } from './db.js';
+import { initDB, closeDB, upsertCompany, ROOT, now, isPostgres } from './db.js';
 import { normCompany } from './lib/normalize.js';
 import { indiaGate } from './lib/india.js';
 import { mapLimit } from './lib/http.js';
@@ -31,7 +31,7 @@ function countIndia(adapterId, jobs) {
 }
 
 async function main() {
-  getDB();
+  await initDB();
   const candidates = JSON.parse(readFileSync(join(ROOT, 'data', 'companies.json'), 'utf8'));
 
   const tasks = [];
@@ -59,7 +59,7 @@ async function main() {
       ? (t.adapterId === 'smartrecruiters' ? (res.indiaTotal ?? 0) : countIndia(t.adapterId, res.jobs))
       : 0;
 
-    upsertCompany({
+    await upsertCompany({
       name: t.name,
       normalized_name: normCompany(t.name),
       ats_type: t.adapterId,

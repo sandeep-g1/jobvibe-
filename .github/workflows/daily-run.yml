@@ -1,0 +1,42 @@
+name: Daily job run
+
+on:
+  schedule:
+    # 02:30 UTC = 08:00 IST
+    - cron: '30 2 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --omit=dev
+
+      - name: Verify database connection
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:check
+
+      - name: Refresh board registry (Mondays only)
+        if: github.event.schedule == '30 2 * * 1' || github.event_name == 'workflow_dispatch'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run seed
+
+      - name: Run pipeline
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+          CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+        run: npm run run

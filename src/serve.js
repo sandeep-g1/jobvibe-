@@ -4,7 +4,8 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ROOT, getDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
+  ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
+  appliedSet, isPostgres,
 } from './db.js';
 import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
@@ -57,7 +58,7 @@ font-size:.9rem;font-weight:600;cursor:pointer}</style></head>
 <button type="submit">Sign in</button></form></body></html>`;
 }
 
-const server = createServer(async (req, res) => {
+export async function handler(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -78,7 +79,9 @@ const server = createServer(async (req, res) => {
         try {
           const { fingerprint } = JSON.parse(body);
           if (!fingerprint) return send(res, 400, 'application/json', '{"error":"fingerprint required"}');
-          send(res, 200, 'application/json', JSON.stringify(toggleApplied(fingerprint)));
+          toggleApplied(fingerprint)
+            .then((out) => send(res, 200, 'application/json', JSON.stringify(out)))
+            .catch((e) => send(res, 500, 'application/json', JSON.stringify({ error: e.message })));
         } catch (e) {
           send(res, 400, 'application/json', JSON.stringify({ error: e.message }));
         }
@@ -87,27 +90,27 @@ const server = createServer(async (req, res) => {
     }
 
     if (path === '/api/runs') {
-      return send(res, 200, 'application/json', JSON.stringify(allRuns(), null, 2));
+      return send(res, 200, 'application/json', JSON.stringify(await allRuns(), null, 2));
     }
 
     /* ---- pages ---- */
     if (path === '/') {
       const p = profile();
-      return send(res, 200, 'text/html; charset=utf-8', dashboardPage(p, sourceStatus(p)));
+      return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p)));
     }
 
     if (path === '/reports') {
-      return send(res, 200, 'text/html; charset=utf-8', reportsPage(profile()));
+      return send(res, 200, 'text/html; charset=utf-8', await reportsPage(profile()));
     }
 
     const m = path.match(/^\/reports\/(latest|\d+)$/);
     if (m) {
-      const run = m[1] === 'latest' ? latestRun() : runById(Number(m[1]));
+      const run = m[1] === 'latest' ? await latestRun() : await runById(Number(m[1]));
       if (!run) {
         return send(res, 404, 'text/html; charset=utf-8',
           notFoundPage(`No report #${m[1]} exists yet.`));
       }
-      const rows = buildRows(matchesForRun(run.id));
+      const rows = buildRows(await matchesForRun(run.id), await appliedSet());
       const html = renderReport(rows, {
         profile: profile(),
         runId: run.id,
@@ -135,14 +138,23 @@ const server = createServer(async (req, res) => {
   } catch (err) {
     send(res, 500, 'text/html; charset=utf-8', notFoundPage(err.message));
   }
-});
+}
 
-getDB();
-server.listen(PORT, '0.0.0.0', () => {
-  const run = latestRun();
-  console.log('\n  Shortlist India');
-  console.log(`  http://localhost:${PORT}`);
-  console.log(`  Dashboard · Reports · ${run ? `latest run #${run.id} (${run.n_reported} jobs)` : 'no runs yet'}`);
-  if (!PASSWORD) console.log('  No APP_PASSWORD set — fine locally, required before hosting publicly.');
-  console.log('');
-});
+export default handler;
+
+// Only start a listening server when run directly (`npm run serve`).
+// On Vercel the exported handler is invoked per request instead.
+const RUN_DIRECTLY = process.argv[1] && process.argv[1].endsWith('serve.js');
+if (RUN_DIRECTLY) {
+  await initDB();
+  const server = createServer(handler);
+  server.listen(PORT, '0.0.0.0', async () => {
+    const run = await latestRun();
+    console.log('\n  Shortlist India');
+    console.log(`  storage: ${isPostgres ? 'Postgres (Supabase)' : 'SQLite (local)'}`);
+    console.log(`  http://localhost:${PORT}`);
+    console.log(`  Dashboard · Reports · ${run ? `latest run #${run.id} (${run.n_reported} jobs)` : 'no runs yet'}`);
+    if (!PASSWORD) console.log('  No APP_PASSWORD set — fine locally, required before hosting publicly.');
+    console.log('');
+  });
+}

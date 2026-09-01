@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ADAPTERS, isUsable, availableQueryAdapters } from './adapters/index.js';
 import {
-  getDB, ROOT, startRun, finishRun, liveCompanies, upsertJob,
-  alreadySeen, insertMatch, matchesForRun,
+  initDB, closeDB, ROOT, startRun, finishRun, liveCompanies, upsertJob,
+  seenFingerprints, insertMatch, matchesForRun, appliedSet, isPostgres,
 } from './db.js';
 import { BOARD_ADAPTERS } from './adapters/index.js';
 const BOARD_IDS = new Set(Object.keys(BOARD_ADAPTERS));
@@ -22,19 +22,20 @@ const info = (msg) => console.log(`     ${msg}`);
 
 async function main() {
   const t0 = Date.now();
-  getDB();
+  await initDB();
   const profile = JSON.parse(readFileSync(join(ROOT, 'profile.json'), 'utf8'));
-  const runId = startRun();
+  const runId = await startRun();
   const errors = [];
   const perSource = {};
 
   console.log(`\nShortlist India — run #${runId}`);
   console.log(`Profile: ${profile.name} · ${profile.totalExpYears}y · ${profile.baseCity}`);
+  console.log(`Storage: ${isPostgres ? 'Postgres (Supabase)' : 'SQLite (local)'}`);
 
   /* ---- 01 fan out ---- */
   stage(1, 'Fan out across verified boards');
   const boardSources = (profile.sources || []).filter((s) => BOARD_IDS.has(s));
-  const companies = liveCompanies(boardSources);
+  const companies = await liveCompanies(boardSources);
   info(`${companies.length} live boards in registry`);
 
   const raw = [];
@@ -139,7 +140,8 @@ async function main() {
   }
   if (nearDupes) info(`${nearDupes} near-duplicate reposts merged`);
 
-  const fresh = final.filter((j) => !alreadySeen(j.fingerprint, profile.userId));
+  const seen = await seenFingerprints(profile.userId);
+  const fresh = final.filter((j) => !seen.has(j.fingerprint));
   info(`${fresh.length} NEW · ${final.length - fresh.length} already shown on a previous run`);
 
   /* ---- 05 enrich ---- */
@@ -163,7 +165,7 @@ async function main() {
   /* ---- 09a persist jobs ---- */
   const stored = [];
   for (const j of enriched) {
-    const { id } = upsertJob({ ...j, location_raw: j.location_raw, company_id: j.company_id });
+    const { id } = await upsertJob({ ...j, location_raw: j.location_raw, company_id: j.company_id });
     stored.push({ ...j, id });
   }
 
@@ -204,7 +206,7 @@ async function main() {
   /* ---- 09b persist matches ---- */
   stage(9, 'Persist matches');
   for (const s of alive) {
-    insertMatch({
+    await insertMatch({
       fingerprint: s.job.fingerprint,
       job_id: s.job.id,
       run_id: runId,
@@ -223,11 +225,12 @@ async function main() {
 
   /* ---- 10 render ---- */
   stage(10, 'Render report');
-  const rows = matchesForRun(runId);
-  const reportPath = writeReport(rows, { profile, runId, errors, perSource });
+  const rows = await matchesForRun(runId);
+  const applied = await appliedSet(profile.userId);
+  const reportPath = writeReport(rows, { profile, runId, errors, perSource, applied });
   info(reportPath);
 
-  finishRun(runId, {
+  await finishRun(runId, {
     perSource,
     fetched: raw.length,
     afterIndia: indian.length,

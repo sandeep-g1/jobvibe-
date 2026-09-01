@@ -3,7 +3,7 @@
 // competition signal, verified-link state, score breakdown).
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT, appliedSet } from './db.js';
+import { ROOT } from './db.js';
 import { displayCity } from './lib/india.js';
 
 const esc = (s) =>
@@ -33,8 +33,7 @@ function postedLabel(iso) {
   return `${Math.floor(d / 30)} mo`;
 }
 
-export function buildRows(matches) {
-  const applied = new Set(appliedSet());
+export function buildRows(matches, applied = new Set()) {
   return matches.map((m, i) => ({
     n: i + 1,
     fingerprint: m.fingerprint,
@@ -64,8 +63,8 @@ export function buildRows(matches) {
   }));
 }
 
-export function writeReport(matches, { profile, runId, errors = [], perSource = {} }) {
-  const rows = buildRows(matches);
+export function writeReport(matches, { profile, runId, errors = [], perSource = {}, applied = new Set() }) {
+  const rows = buildRows(matches, applied);
   const dir = join(ROOT, 'reports');
   mkdirSync(dir, { recursive: true });
   const date = new Date().toISOString().slice(0, 10);

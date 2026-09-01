@@ -1,6 +1,6 @@
 // Dashboard ("face page") and the reports index. Same visual language as the
 // report itself so the whole app reads as one product.
-import { dashboardStats, allRuns, appliedSet } from '../db.js';
+import { dashboardStats, allRuns } from '../db.js';
 
 const esc = (s) =>
   String(s ?? '')
@@ -118,9 +118,9 @@ ${body}
 /*  Dashboard                                                          */
 /* ------------------------------------------------------------------ */
 
-export function dashboardPage(profile, sourceStatus) {
-  const s = dashboardStats();
-  const runs = allRuns();
+export async function dashboardPage(profile, sourceStatus) {
+  const s = await dashboardStats();
+  const runs = await allRuns();
   const latest = runs[0];
 
   // Most-demanded skills you don't have — the Phase 5 gap-review queue, previewed.
@@ -234,8 +234,8 @@ export function dashboardPage(profile, sourceStatus) {
 /*  Reports index                                                      */
 /* ------------------------------------------------------------------ */
 
-export function reportsPage(profile) {
-  const runs = allRuns();
+export async function reportsPage(profile) {
+  const runs = await allRuns();
 
   const body = `
 <div class="hero">

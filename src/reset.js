@@ -1,22 +1,20 @@
 // Clear jobs, matches and runs so the next run treats everything as new again.
 // The verified company registry is preserved — re-seeding is the slow part.
 // Applied history is preserved too, unless you pass --all.
-import { getDB } from './db.js';
+import { initDB, closeDB, clearRuns, registryHealth, isPostgres } from './db.js';
 
 const all = process.argv.includes('--all');
-const d = getDB();
 
-const before = {
-  jobs: d.prepare('SELECT COUNT(*) c FROM jobs').get().c,
-  matches: d.prepare('SELECT COUNT(*) c FROM job_matches').get().c,
-  runs: d.prepare('SELECT COUNT(*) c FROM runs').get().c,
-};
+await initDB();
+const before = await clearRuns({ includeApplications: all });
+const health = await registryHealth();
+const live = health.byAts.reduce((a, r) => a + Number(r.live), 0);
 
-d.exec('DELETE FROM job_matches');
-d.exec('DELETE FROM jobs');
-d.exec('DELETE FROM runs');
-if (all) d.exec('DELETE FROM applications');
+console.log('');
+console.log(`  storage: ${isPostgres ? 'Postgres (Supabase)' : 'SQLite (local)'}`);
+console.log(`  cleared ${before.matches} matches, ${before.jobs} jobs, ${before.runs} runs`);
+console.log(`  registry kept: ${live} live boards`);
+console.log(`  applied history: ${all ? 'cleared' : 'kept'}`);
+console.log('');
 
-console.log(`\n  cleared ${before.matches} matches, ${before.jobs} jobs, ${before.runs} runs`);
-console.log(`  registry kept: ${d.prepare("SELECT COUNT(*) c FROM companies WHERE board_status='live'").get().c} live boards`);
-console.log(`  applied history: ${all ? 'cleared' : `${d.prepare('SELECT COUNT(*) c FROM applications').get().c} kept`}\n`);
+await closeDB();
