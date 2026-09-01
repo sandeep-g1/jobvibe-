@@ -1,0 +1,7 @@
+{
+  "_comment": "Copy to keys.json and fill in. Each Tier A source is optional — the pipeline runs on Tier B alone without any of these.",
+  "adzuna":    { "appId": "YOUR_ADZUNA_APP_ID", "appKey": "YOUR_ADZUNA_APP_KEY" },
+  "jooble":    { "apiKey": "YOUR_JOOBLE_KEY" },
+  "careerjet": { "affid": "YOUR_CAREERJET_AFFID" },
+  "jsearch":   { "rapidApiKey": "YOUR_RAPIDAPI_KEY" }
+}

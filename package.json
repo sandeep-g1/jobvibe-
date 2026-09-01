@@ -1,0 +1,17 @@
+{
+  "name": "shortlist-india",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daily de-duplicated shortlist of India jobs with verified apply links and ATS match scoring.",
+  "scripts": {
+    "seed": "node --no-warnings src/seed.js",
+    "run": "node --no-warnings src/run.js",
+    "serve": "node --no-warnings src/serve.js",
+    "stats": "node --no-warnings src/stats.js",
+    "reset": "node --no-warnings src/reset.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
