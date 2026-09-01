@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }],
-  "functions": { "api/index.js": { "maxDuration": 30 } }
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30,
+      "includeFiles": "{profile.example.json,profile.local.json,profile.json,data/**}"
+    }
+  }
 }

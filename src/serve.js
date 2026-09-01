@@ -59,9 +59,55 @@ font-size:.9rem;font-weight:600;cursor:pointer}</style></head>
 <button type="submit">Sign in</button></form></body></html>`;
 }
 
+/**
+ * A deploy with no DATABASE_URL would otherwise fall over with a stack trace.
+ * Say what is wrong and where to fix it instead.
+ */
+function setupPage(detail) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setup needed — Shortlist India</title>
+<style>body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;margin:0;padding:40px 20px;color:#1a1a2e}
+.b{max-width:620px;margin:0 auto;background:#fff;border-radius:12px;padding:32px;
+box-shadow:0 2px 14px rgba(0,0,0,.08)}h1{font-size:1.25rem;color:#0a66c2;margin:0 0 6px}
+p{color:#667085;font-size:.9rem;line-height:1.6}code{background:#f2f4f8;padding:2px 6px;
+border-radius:4px;font-size:.85rem}ol{color:#667085;font-size:.9rem;line-height:1.9}
+.e{background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:8px;font-size:.82rem;
+margin-top:18px;font-family:monospace;word-break:break-all}</style></head>
+<body><div class="b"><h1>Almost there</h1>
+<p>The app is deployed but has no database to read from.</p>
+<ol><li>Vercel &rarr; your project &rarr; <b>Settings &rarr; Environment Variables</b></li>
+<li>Add <code>DATABASE_URL</code> — your Supabase <b>Transaction pooler</b> string (port 6543)</li>
+<li>Add <code>APP_PASSWORD</code> — any password; it protects this dashboard</li>
+<li>Tick Production, Preview and Development</li>
+<li><b>Deployments &rarr; &ctdot; &rarr; Redeploy</b></li></ol>
+<div class="e">${esc(detail)}</div></div></body></html>`;
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 export async function handler(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.replace(/\/+$/, '') || '/';
+
+  // Health check — reachable without the password so deploys can be diagnosed.
+  if (path === '/api/health') {
+    const out = { ok: false, storage: isPostgres ? 'postgres' : 'sqlite', databaseUrlSet: isPostgres };
+    try {
+      const run = await latestRun();
+      out.ok = true;
+      out.latestRun = run ? { id: run.id, jobs: run.n_reported, at: run.started_at } : null;
+    } catch (err) {
+      out.error = err.message;
+    }
+    return send(res, out.ok ? 200 : 503, 'application/json', JSON.stringify(out, null, 2));
+  }
+
+  if (!isPostgres && process.env.VERCEL) {
+    return send(res, 503, 'text/html; charset=utf-8',
+      setupPage('DATABASE_URL is not set in this deployment.'));
+  }
 
   if (!authorised(req)) return send(res, 401, 'text/html; charset=utf-8', loginPage());
 
