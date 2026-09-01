@@ -100,7 +100,14 @@ Bands: **≥75 apply · 60–74 consider · <60 skip.**
 
 ## Configuration
 
-`profile.json` — your search profile. Edit and re-run; nothing is hardcoded.
+`profile.local.json` — your search profile. Copy it from `profile.example.json`:
+
+```bash
+cp profile.example.json profile.local.json
+```
+
+It is gitignored, so your name and resume text never reach the public repo.
+Edit and re-run; nothing is hardcoded.
 
 - `jobTitles` — drives the title component. Add variants you'd genuinely take.
 - `skillBank` — the truth boundary. Phase 5's resume tailor may only use what's in here.

@@ -1,7 +1,7 @@
 {
-  "_comment": "Your search profile. Everything here is editable — change it and re-run. In Phase 2 this moves into the database behind a login and becomes editable in the UI.",
+  "_comment": "Copy this to profile.local.json and edit it with your own details. profile.local.json is gitignored so your personal information is never committed.",
   "userId": "local",
-  "name": "Vaishnavi Nair",
+  "name": "Your Name",
   "totalExpYears": 6,
   "baseCity": "bengaluru",
   "preferredLocations": [
@@ -71,7 +71,7 @@
     "Compliance",
     "BFSI"
   ],
-  "resumeText": "Project Management professional with 6+ years of experience delivering technology and business transformation programmes in BFSI and consulting environments. Experienced in end-to-end project lifecycle management, PMO governance, stakeholder management across business and technology teams, transition and change management, risk and issue tracking, resource and capacity planning, vendor coordination and executive status reporting. Hands-on with JIRA, Confluence, MS Project, SharePoint, advanced Excel and Power BI dashboards for delivery metrics and KPI reporting. Background spans mutual funds and asset management operations, distribution strategy, business analysis, requirement gathering, process improvement and regulatory compliance. Certified in Power BI. Delivered Agile and Waterfall projects, ran sprint ceremonies, managed cross-functional teams and client-facing delivery for enterprise customers.",
+  "resumeText": "Paste a plain-text summary of your resume here. The richer and more honest it is, the better the semantic match score. Include your responsibilities, tools, domains and achievements as continuous prose \u2014 no formatting needed.",
   "minScore": 45,
   "dailyLimit": 60,
   "sources": [

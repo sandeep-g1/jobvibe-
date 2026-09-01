@@ -10,6 +10,7 @@ import {
 import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
+import { loadProfile } from './lib/profile.js';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = process.env.APP_PASSWORD || '';
@@ -20,7 +21,7 @@ function send(res, code, type, body) {
 }
 
 function profile() {
-  return JSON.parse(readFileSync(join(ROOT, 'profile.json'), 'utf8'));
+  return loadProfile();
 }
 
 function sourceStatus(p) {

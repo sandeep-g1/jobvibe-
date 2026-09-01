@@ -6,3 +6,5 @@ reports/
 keys.json
 .env
 .DS_Store
+profile.local.json
+profile.json

@@ -16,6 +16,7 @@ import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score
 import { verifyJobs, STATUS } from './verify.js';
 import { writeReport } from './report.js';
 import { mapLimit } from './lib/http.js';
+import { loadProfile } from './lib/profile.js';
 
 const stage = (n, label) => console.log(`\n[${String(n).padStart(2, '0')}] ${label}`);
 const info = (msg) => console.log(`     ${msg}`);
@@ -23,7 +24,7 @@ const info = (msg) => console.log(`     ${msg}`);
 async function main() {
   const t0 = Date.now();
   await initDB();
-  const profile = JSON.parse(readFileSync(join(ROOT, 'profile.json'), 'utf8'));
+  const profile = loadProfile();
   const runId = await startRun();
   const errors = [];
   const perSource = {};
