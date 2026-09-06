@@ -11,6 +11,7 @@ import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { settingsPage } from './web/settings.js';
+import { emailConfigured } from './email.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
 import { loadProfileAsync, FIELDS, normaliseProfile } from './lib/profile.js';
@@ -241,6 +242,9 @@ export async function handler(req, res) {
         settingsPage(p, FIELDS, {
           runner: RUNNER,
           lastRun: await latestRun(),
+          emailNote: emailConfigured()
+            ? 'Mail is configured. A digest is sent after every search.'
+            : 'No mail provider yet — set RESEND_API_KEY and these addresses start receiving reports.',
           saved: url.searchParams.get('saved') === '1',
         }));
     }

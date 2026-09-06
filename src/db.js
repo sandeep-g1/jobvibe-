@@ -182,6 +182,27 @@ export async function appliedSet(userId = 'local') {
   return new Set(rows.map((r) => r.fingerprint));
 }
 
+/* ---------------- email ---------------- */
+
+export async function logDigest({ runId, to, cc, providerId, error, n }) {
+  try {
+    const d = await db();
+    await d.run(
+      `INSERT INTO email_digests (run_id, recipients, cc, provider_id, error, n_jobs, sent_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [runId, JSON.stringify(to || []), JSON.stringify(cc || []),
+       providerId ?? null, error ?? null, n | 0, now()]
+    );
+  } catch (err) {
+    console.warn(`could not log the digest (${err.message})`);
+  }
+}
+
+export async function recentDigests(limit = 10) {
+  const d = await db();
+  return d.query('SELECT * FROM email_digests ORDER BY id DESC LIMIT ?', [limit]);
+}
+
 /* ---------------- profile ---------------- */
 
 export async function getProfileRow(userId = 'local') {

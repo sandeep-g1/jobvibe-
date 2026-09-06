@@ -95,6 +95,11 @@ export const FIELDS = [
   { key: 'excludeKeywords', type: 'list', label: 'Exclude titles containing',
     help: 'One per line. Matched against the job title only.' },
   { key: 'excludeCompanies', type: 'list', label: 'Exclude these companies' },
+  { key: 'emailEnabled', type: 'toggle', label: 'Email me the daily report' },
+  { key: 'emailTo', type: 'list', label: 'Send report to',
+    help: 'One address per line. These are the main recipients.' },
+  { key: 'emailCc', type: 'list', label: 'Copy to',
+    help: 'One per line. Copied on every report.' },
 ];
 
 /** Coerce submitted form values into the profile shape. */
@@ -103,7 +108,9 @@ export function normaliseProfile(input, previous = {}) {
   const lines = (v) => String(v || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 
   for (const f of FIELDS) {
-    const raw = input[f.key];
+    let raw = input[f.key];
+    // An unticked checkbox submits nothing at all.
+    if (f.type === 'toggle' && raw === undefined) raw = 'off';
     if (raw === undefined) continue;
     if (f.type === 'number') {
       const n = Number(raw);
@@ -112,6 +119,8 @@ export function normaliseProfile(input, previous = {}) {
       out[f.key] = lines(raw);
     } else if (f.type === 'modes' || f.type === 'sources') {
       out[f.key] = Array.isArray(raw) ? raw.filter(Boolean) : lines(raw);
+    } else if (f.type === 'toggle') {
+      out[f.key] = raw === 'on' || raw === 'true' || raw === true;
     } else {
       out[f.key] = String(raw).trim();
     }

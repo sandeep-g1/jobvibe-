@@ -39,4 +39,7 @@ jobs:
           JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
           CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          SITE_URL: https://jobvibe-green.vercel.app
         run: npm run run

@@ -14,7 +14,8 @@ import { indiaGate } from './lib/india.js';
 import { extractSkills, extractExperience, extractEmploymentType } from './lib/skills.js';
 import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score.js';
 import { verifyJobs, STATUS } from './verify.js';
-import { writeReport } from './report.js';
+import { writeReport, buildRows } from './report.js';
+import { sendDigest } from './email.js';
 import { mapLimit } from './lib/http.js';
 import { loadProfileAsync } from './lib/profile.js';
 

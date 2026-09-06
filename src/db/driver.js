@@ -229,6 +229,17 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS email_digests (
+    id          ${pk},
+    run_id      INTEGER,
+    recipients  ${json},
+    cc          ${json},
+    provider_id TEXT,
+    error       TEXT,
+    n_jobs      INTEGER DEFAULT 0,
+    sent_at     TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS profiles (
     id         ${pk},
     user_id    TEXT NOT NULL UNIQUE,

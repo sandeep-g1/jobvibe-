@@ -53,6 +53,12 @@ function renderField(f, profile) {
     return `<div class="fld"><label>${esc(f.label)}</label><div class="checks">${boxes}</div>${help}</div>`;
   }
 
+  if (f.type === 'toggle') {
+    const on = val !== false;
+    return `<div class="fld"><label class="chk" style="font-weight:600">` +
+      `<input type="checkbox" name="${esc(f.key)}"${on ? ' checked' : ''}> ${esc(f.label)}</label>${help}</div>`;
+  }
+
   if (f.type === 'list') {
     const arr = Array.isArray(val) ? val : [];
     const rows = Math.min(10, Math.max(3, arr.length + 1));
@@ -126,6 +132,9 @@ export function settingsPage(profile, fields, opts = {}) {
         ${group(['minScore', 'dailyLimit', 'excludeKeywords', 'excludeCompanies'])}</div>
       <div class="card"><h3>Resume summary</h3>
         ${group(['resumeText'])}</div>
+      <div class="card"><h3>Email delivery</h3>
+        ${group(['emailEnabled', 'emailTo', 'emailCc'])}
+        <p class="muted" style="margin-top:4px">${esc(opts.emailNote || '')}</p></div>
     </div>
     <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn" type="submit">Save settings</button>
