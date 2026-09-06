@@ -7,6 +7,18 @@ function redact(url) {
   return url.replace(/:\/\/([^:]+):([^@]+)@/, '://$1:****@');
 }
 
+// In CI a missing DATABASE_URL must fail loudly. Falling back to SQLite there
+// writes to an ephemeral runner file that vanishes when the job ends, so the
+// workflow goes green while nothing is actually saved.
+if (!isPostgres && (process.env.CI || process.env.GITHUB_ACTIONS)) {
+  console.error('');
+  console.error('  DATABASE_URL is not set in this environment.');
+  console.error('  Refusing to run against ephemeral SQLite — the results would be discarded.');
+  console.error('  Add DATABASE_URL under Settings > Secrets and variables > Actions.');
+  console.error('');
+  process.exit(1);
+}
+
 console.log('');
 if (!isPostgres) {
   console.log('  DATABASE_URL is not set — using local SQLite.');

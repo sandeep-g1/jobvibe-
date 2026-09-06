@@ -23,6 +23,16 @@ const info = (msg) => console.log(`     ${msg}`);
 
 async function main() {
   const t0 = Date.now();
+
+  // Same guard as db:check — a scheduled run that quietly writes to a throwaway
+  // SQLite file looks successful and produces nothing.
+  if (!isPostgres && (process.env.CI || process.env.GITHUB_ACTIONS)) {
+    console.error('');
+    console.error('  DATABASE_URL is not set. Refusing to run against ephemeral storage.');
+    console.error('');
+    process.exit(1);
+  }
+
   await initDB();
   const profile = await loadProfileAsync();
   const runId = await startRun();
