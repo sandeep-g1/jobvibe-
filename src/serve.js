@@ -7,13 +7,14 @@ import {
   ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres,
 } from './db.js';
+import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
 import { loadProfile } from './lib/profile.js';
 
 const PORT = Number(process.env.PORT || 3100);
-const PASSWORD = process.env.APP_PASSWORD || '';
+const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
 
 function send(res, code, type, body) {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -94,6 +95,20 @@ export async function handler(req, res) {
   // Health check — reachable without the password so deploys can be diagnosed.
   if (path === '/api/health') {
     const out = { ok: false, storage: isPostgres ? 'postgres' : 'sqlite', databaseUrlSet: isPostgres };
+    // Diagnostics only — host and lengths, never the credential itself.
+    try {
+      const raw = process.env.DATABASE_URL || '';
+      out.dbUrlLen = raw.length;
+      const u = new URL(raw);
+      out.dbHost = u.hostname;
+      out.dbPort = u.port;
+      out.dbName = u.pathname;
+      out.dbUser = u.username;
+    } catch (e) {
+      out.dbUrlParse = `unparseable: ${e.message}`;
+      out.dbUrlHead = (process.env.DATABASE_URL || '').slice(0, 14);
+    }
+    out.appPasswordLen = PASSWORD.length;
     try {
       const run = await latestRun();
       out.ok = true;

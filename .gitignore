@@ -8,3 +8,6 @@ keys.json
 .DS_Store
 profile.local.json
 profile.json
+
+.vercel
+.env*

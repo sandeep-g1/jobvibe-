@@ -23,12 +23,22 @@ function loadEnv() {
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
       v = v.slice(1, -1);
     }
-    if (!process.env[m[1]]) process.env[m[1]] = v;
+    if (!process.env[m[1]]) process.env[m[1]] = v.replace(/^﻿/, '');
   }
 }
 loadEnv();
 
-export const DATABASE_URL = process.env.DATABASE_URL || '';
+/**
+ * Environment values arrive from many places — .env files, CI, Vercel's
+ * dashboard, a shell pipe — and any of them can prepend a UTF-8 BOM or leave
+ * stray whitespace. A BOM in front of a connection string makes `new URL()`
+ * throw and sends the driver looking for a nonsense host, so clean on read.
+ */
+export function cleanEnv(v) {
+  return String(v ?? '').replace(/^﻿/, '').replace(/^\s+|\s+$/g, '');
+}
+
+export const DATABASE_URL = cleanEnv(process.env.DATABASE_URL);
 export const isPostgres = !!DATABASE_URL;
 
 let impl = null;
