@@ -5,13 +5,15 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
-  appliedSet, isPostgres,
+  appliedSet, isPostgres, saveProfileRow,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
+import { settingsPage } from './web/settings.js';
+import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
-import { loadProfile } from './lib/profile.js';
+import { loadProfileAsync, FIELDS, normaliseProfile } from './lib/profile.js';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
@@ -21,8 +23,80 @@ function send(res, code, type, body) {
   res.end(body);
 }
 
-function profile() {
-  return loadProfile();
+const profile = () => loadProfileAsync();
+
+/** Where can a search actually be started from? */
+const RUNNER = process.env.VERCEL
+  ? (cleanEnv(process.env.GITHUB_TOKEN) ? 'github' : 'none')
+  : 'local';
+
+let running = false;
+
+/** Read a urlencoded form body into an object, keeping repeated keys as arrays. */
+function readForm(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (d) => { body += d; if (body.length > 2e6) req.destroy(); });
+    req.on('error', reject);
+    req.on('end', () => {
+      const params = new URLSearchParams(body);
+      const out = {};
+      for (const key of new Set(params.keys())) {
+        const all = params.getAll(key);
+        out[key] = all.length > 1 ? all : all[0];
+      }
+      // Unticked checkbox groups submit nothing; treat them as empty, not absent.
+      for (const f of FIELDS) {
+        if ((f.type === 'modes' || f.type === 'sources') && out[f.key] === undefined) out[f.key] = [];
+        else if ((f.type === 'modes' || f.type === 'sources') && !Array.isArray(out[f.key])) {
+          out[f.key] = [out[f.key]];
+        }
+      }
+      resolve(out);
+    });
+  });
+}
+
+/** Start the pipeline locally as a detached child, or dispatch the GitHub workflow. */
+async function startRun() {
+  if (running) return { started: false, message: 'A search is already running.' };
+
+  if (RUNNER === 'local') {
+    running = true;
+    const child = spawn(process.execPath, ['--no-warnings', join(ROOT, 'src', 'run.js')], {
+      cwd: ROOT, detached: true, stdio: 'ignore', env: process.env,
+    });
+    child.unref();
+    child.on('exit', () => { running = false; });
+    setTimeout(() => { running = false; }, 20 * 60 * 1000);
+    return { started: true, message: 'Search started. It takes about five minutes.' };
+  }
+
+  if (RUNNER === 'github') {
+    const repo = cleanEnv(process.env.GITHUB_REPO) || 'sandeep-g1/jobvibe-';
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/daily-run.yml/dispatches`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cleanEnv(process.env.GITHUB_TOKEN)}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'jobvibe',
+        },
+        body: JSON.stringify({ ref: 'main' }),
+      }
+    );
+    if (res.status === 204) {
+      return { started: true, message: 'Search queued on GitHub Actions. About five minutes.' };
+    }
+    return { started: false, message: `GitHub refused the request (HTTP ${res.status}).` };
+  }
+
+  return {
+    started: false,
+    message: 'No runner available here. Run `npm run run` locally, or set GITHUB_TOKEN.',
+  };
 }
 
 function sourceStatus(p) {
@@ -157,12 +231,38 @@ export async function handler(req, res) {
 
     /* ---- pages ---- */
     if (path === '/') {
-      const p = profile();
+      const p = await profile();
       return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p)));
     }
 
+    if (path === '/settings' && req.method === 'GET') {
+      const p = await profile();
+      return send(res, 200, 'text/html; charset=utf-8',
+        settingsPage(p, FIELDS, {
+          runner: RUNNER,
+          lastRun: await latestRun(),
+          saved: url.searchParams.get('saved') === '1',
+        }));
+    }
+
+    if (path === '/settings' && req.method === 'POST') {
+      const form = await readForm(req);
+      const previous = await profile();
+      const merged = normaliseProfile(form, previous);
+      await saveProfileRow(merged);
+      res.writeHead(303, { Location: '/settings?saved=1' });
+      return res.end();
+    }
+
+    if (path === '/api/run' && req.method === 'POST') {
+      const knownRuns = (await allRuns()).length;
+      const out = await startRun();
+      return send(res, out.started ? 202 : 409, 'application/json',
+        JSON.stringify({ ...out, knownRuns, runner: RUNNER }));
+    }
+
     if (path === '/reports') {
-      return send(res, 200, 'text/html; charset=utf-8', await reportsPage(profile()));
+      return send(res, 200, 'text/html; charset=utf-8', await reportsPage(await profile()));
     }
 
     const m = path.match(/^\/reports\/(latest|\d+)$/);
@@ -174,7 +274,7 @@ export async function handler(req, res) {
       }
       const rows = buildRows(await matchesForRun(run.id), await appliedSet());
       const html = renderReport(rows, {
-        profile: profile(),
+        profile: await profile(),
         runId: run.id,
         errors: JSON.parse(run.errors || '[]'),
         perSource: JSON.parse(run.per_source || '{}'),

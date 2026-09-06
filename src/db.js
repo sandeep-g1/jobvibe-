@@ -182,6 +182,30 @@ export async function appliedSet(userId = 'local') {
   return new Set(rows.map((r) => r.fingerprint));
 }
 
+/* ---------------- profile ---------------- */
+
+export async function getProfileRow(userId = 'local') {
+  const d = await db();
+  const r = await d.one('SELECT data, updated_at FROM profiles WHERE user_id = ?', [userId]);
+  if (!r) return null;
+  try {
+    return { data: JSON.parse(r.data), updatedAt: r.updated_at };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveProfileRow(profile, userId = 'local') {
+  const d = await db();
+  const json = JSON.stringify(profile);
+  await d.run(
+    `INSERT INTO profiles (user_id, data, updated_at) VALUES (?,?,?)
+     ON CONFLICT (user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+    [userId, json, now()]
+  );
+  return true;
+}
+
 /* ---------------- dashboard ---------------- */
 
 export async function dashboardStats() {

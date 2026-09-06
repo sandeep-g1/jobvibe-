@@ -229,6 +229,13 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS profiles (
+    id         ${pk},
+    user_id    TEXT NOT NULL UNIQUE,
+    data       ${json},
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',

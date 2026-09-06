@@ -1,8 +1,9 @@
 // Dashboard ("face page") and the reports index. Same visual language as the
 // report itself so the whole app reads as one product.
 import { dashboardStats, allRuns } from '../db.js';
+import { FORM_CSS } from './settings.js';
 
-const esc = (s) =>
+export const esc = (s) =>
   String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -80,6 +81,8 @@ export const SHELL_CSS = `
   .muted { color:#8a94a6; font-size:.8rem; }
   .empty { text-align:center; padding:50px 20px; color:#8a94a6; }
 
+${FORM_CSS}
+
   @media (max-width:760px){
     .nav,.hero,.wrap { padding-left:14px; padding-right:14px; }
     .nav { overflow-x:auto; }
@@ -94,6 +97,7 @@ function nav(active, extra = '') {
   ${tab('/', 'Dashboard', 'dash')}
   ${tab('/reports', 'Reports', 'reports')}
   ${tab('/reports/latest', 'Latest Report', 'latest')}
+  ${tab('/settings', 'Search Settings', 'settings')}
   <span class="nav-right">${extra}</span>
 </div>`;
 }

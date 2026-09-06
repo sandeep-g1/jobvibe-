@@ -16,7 +16,7 @@ import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score
 import { verifyJobs, STATUS } from './verify.js';
 import { writeReport } from './report.js';
 import { mapLimit } from './lib/http.js';
-import { loadProfile } from './lib/profile.js';
+import { loadProfileAsync } from './lib/profile.js';
 
 const stage = (n, label) => console.log(`\n[${String(n).padStart(2, '0')}] ${label}`);
 const info = (msg) => console.log(`     ${msg}`);
@@ -24,13 +24,13 @@ const info = (msg) => console.log(`     ${msg}`);
 async function main() {
   const t0 = Date.now();
   await initDB();
-  const profile = loadProfile();
+  const profile = await loadProfileAsync();
   const runId = await startRun();
   const errors = [];
   const perSource = {};
 
   console.log(`\nShortlist India — run #${runId}`);
-  console.log(`Profile: ${profile.name} · ${profile.totalExpYears}y · ${profile.baseCity}`);
+  console.log(`Profile: ${profile.name} [${profile._source}] · ${profile.totalExpYears}y · ${profile.baseCity}`);
   console.log(`Storage: ${isPostgres ? 'Postgres (Supabase)' : 'SQLite (local)'}`);
 
   /* ---- 01 fan out ---- */
