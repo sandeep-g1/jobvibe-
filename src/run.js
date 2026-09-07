@@ -261,6 +261,15 @@ async function main() {
   const reportPath = writeReport(rows, { profile, runId, errors, perSource, applied });
   info(reportPath);
 
+  /* ---- 10b email ---- */
+  // After the report is persisted, so a mail failure can never lose a run.
+  stage(11, 'Email the digest');
+  const siteUrl = (process.env.SITE_URL || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
+  const digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
+  info(digest.sent
+    ? `sent to ${digest.to.join(', ')}${digest.cc?.length ? ` (cc ${digest.cc.join(', ')})` : ''}`
+    : `skipped — ${digest.reason}`);
+
   await finishRun(runId, {
     perSource,
     fetched: raw.length,
