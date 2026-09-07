@@ -12,6 +12,7 @@ import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { settingsPage } from './web/settings.js';
 import { emailConfigured } from './email.js';
+import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED } from './lib/secrets.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
 import { loadProfileAsync, FIELDS, normaliseProfile } from './lib/profile.js';
@@ -246,6 +247,7 @@ export async function handler(req, res) {
             ? 'Mail is configured. A digest is sent after every search.'
             : 'No mail provider yet — set RESEND_API_KEY and these addresses start receiving reports.',
           saved: url.searchParams.get('saved') === '1',
+          secrets: await secretStatus(),
         }));
     }
 
@@ -255,6 +257,20 @@ export async function handler(req, res) {
       const merged = normaliseProfile(form, previous);
       await saveProfileRow(merged);
       res.writeHead(303, { Location: '/settings?saved=1' });
+      return res.end();
+    }
+
+    if (path === '/settings/keys' && req.method === 'POST') {
+      const form = await readForm(req);
+      let changed = 0;
+      for (const m of MANAGED) {
+        const v = form[m.key];
+        if (v === undefined || v === '') continue; // blank means "leave alone"
+        await saveSecret(m.key, v.trim());
+        changed++;
+      }
+      await loadSecretsIntoEnv();
+      res.writeHead(303, { Location: `/settings?saved=1&keys=${changed}` });
       return res.end();
     }
 

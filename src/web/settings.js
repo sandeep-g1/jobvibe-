@@ -20,7 +20,7 @@ const SOURCES = [
 export const FORM_CSS = `
   form .fld { margin-bottom:15px; }
   form label { display:block; font-size:.8rem; font-weight:600; color:#475467; margin-bottom:5px; }
-  form input[type=text], form input[type=number], form textarea {
+  form input[type=text], form input[type=number], form input[type=password], form textarea {
     width:100%; padding:8px 11px; border:1.5px solid #d0d5dd; border-radius:7px;
     font-size:.86rem; font-family:inherit; background:#fff; color:#1a1a2e; }
   form textarea { resize:vertical; line-height:1.55; }
@@ -34,6 +34,11 @@ export const FORM_CSS = `
              border-radius:8px; font-weight:700; }
   button.btn { border:0; cursor:pointer; font-family:inherit; }
   button.btn:disabled { opacity:.55; cursor:default; }
+  .kstate { float:right; font-size:.66rem; font-weight:700; padding:1px 7px; border-radius:8px;
+            text-transform:uppercase; letter-spacing:.4px; }
+  .kstate.ok  { background:#dcfce7; color:#166534; }
+  .kstate.env { background:#e0e7ff; color:#3730a3; }
+  .kstate.no  { background:#f2f4f8; color:#8a94a6; }
   .saved { background:#dcfce7; color:#166534; border:1px solid #a7e3bf; border-radius:8px;
            padding:9px 14px; font-size:.85rem; font-weight:600; margin-bottom:14px; }
 `;
@@ -76,8 +81,45 @@ function renderField(f, profile) {
     `<input type="${t}" name="${esc(f.key)}" value="${esc(val == null ? '' : val)}">${help}</div>`;
 }
 
+export function keysCard(secrets) {
+  const rows = secrets.map((k) => {
+    const state = k.fromEnv
+      ? '<span class="kstate env">from .env</span>'
+      : k.inDb
+        ? '<span class="kstate ok">saved</span>'
+        : '<span class="kstate no">not set</span>';
+    return `<div class="fld">
+      <label>${esc(k.label)} ${state}</label>
+      <input type="${k.plain ? 'text' : 'password'}" name="${esc(k.key)}"
+             autocomplete="off" spellcheck="false"
+             placeholder="${k.set ? 'Leave blank to keep the current value' : 'Paste here'}">
+      ${k.help ? `<span class="help">${esc(k.help)}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+  <form method="POST" action="/settings/keys" id="keysForm">
+    <div class="card" style="margin-bottom:16px">
+      <h3>Keys &amp; credentials</h3>
+      <p class="muted" style="margin-bottom:14px">
+        Paste keys here instead of editing files. They are encrypted before being stored and are
+        never shown again — only whether each one is set. A value in <code>.env</code> always wins.
+      </p>
+      <div class="grid g2">${rows}</div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn" type="submit">Save keys</button>
+        <span class="muted">Blank fields are left unchanged. Type a single space to clear one.</span>
+      </div>
+      <p class="muted" style="margin-top:10px">
+        Encrypted with your app password. If you change <code>APP_PASSWORD</code>, re-enter them.
+        <code>DATABASE_URL</code> cannot live here — it is needed to reach this database.
+      </p>
+    </div>
+  </form>`;
+}
+
 export function settingsPage(profile, fields, opts = {}) {
-  const { runner = 'none', lastRun = null, saved = false } = opts;
+  const { runner = 'none', lastRun = null, saved = false, secrets = [] } = opts;
   const group = (keys) => fields.filter((f) => keys.includes(f.key))
     .map((f) => renderField(f, profile)).join('');
 
@@ -117,6 +159,8 @@ export function settingsPage(profile, fields, opts = {}) {
     ${lastRun ? `<div class="muted" style="margin-top:8px">Last run: <b>#${lastRun.id}</b> &middot;
       ${esc(new Date(lastRun.started_at).toLocaleString('en-IN'))} &middot; ${lastRun.n_reported} jobs</div>` : ''}
   </div>
+
+  ${secrets.length ? keysCard(secrets) : ''}
 
   <form method="POST" action="/settings">
     <div class="grid g2">

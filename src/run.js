@@ -18,6 +18,7 @@ import { writeReport, buildRows } from './report.js';
 import { sendDigest } from './email.js';
 import { mapLimit } from './lib/http.js';
 import { loadProfileAsync } from './lib/profile.js';
+import { loadSecretsIntoEnv } from './lib/secrets.js';
 
 const stage = (n, label) => console.log(`\n[${String(n).padStart(2, '0')}] ${label}`);
 const info = (msg) => console.log(`     ${msg}`);
@@ -35,6 +36,7 @@ async function main() {
   }
 
   await initDB();
+  const secrets = await loadSecretsIntoEnv();
   const profile = await loadProfileAsync();
   const runId = await startRun();
   const errors = [];
@@ -43,6 +45,8 @@ async function main() {
   console.log(`\nShortlist India — run #${runId}`);
   console.log(`Profile: ${profile.name} [${profile._source}] · ${profile.totalExpYears}y · ${profile.baseCity}`);
   console.log(`Storage: ${isPostgres ? 'Postgres (Supabase)' : 'SQLite (local)'}`);
+  if (secrets.loaded.length) console.log(`Keys:    ${secrets.loaded.join(', ')} (from database)`);
+  if (secrets.failed.length) console.log(`Keys:    could not decrypt ${secrets.failed.join(', ')} — re-enter them in Search Settings`);
 
   /* ---- 01 fan out ---- */
   stage(1, 'Fan out across verified boards');

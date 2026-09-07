@@ -182,6 +182,33 @@ export async function appliedSet(userId = 'local') {
   return new Set(rows.map((r) => r.fingerprint));
 }
 
+/* ---------------- secrets ---------------- */
+
+export async function listSecretNames() {
+  const d = await db();
+  const rows = await d.query('SELECT name FROM secrets ORDER BY name');
+  return rows.map((r) => r.name);
+}
+
+export async function getSecretRow(name) {
+  const d = await db();
+  return d.one('SELECT name, value, updated_at FROM secrets WHERE name = ?', [name]);
+}
+
+export async function saveSecretRow(name, encrypted) {
+  const d = await db();
+  await d.run(
+    `INSERT INTO secrets (name, value, updated_at) VALUES (?,?,?)
+     ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [name, encrypted, now()]
+  );
+}
+
+export async function deleteSecretRow(name) {
+  const d = await db();
+  await d.run('DELETE FROM secrets WHERE name = ?', [name]);
+}
+
 /* ---------------- email ---------------- */
 
 export async function logDigest({ runId, to, cc, providerId, error, n }) {
