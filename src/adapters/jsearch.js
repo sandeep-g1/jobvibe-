@@ -1,10 +1,13 @@
-// JSearch (RapidAPI) — Tier A, and the important one: it aggregates
-// Google for Jobs, which indexes Naukri, LinkedIn, Indeed, Foundit, Shine,
-// TimesJobs and Hirist. This is how you reach those portals without scraping
-// them. `job_apply_link` is the canonical link Google resolved to, and
-// `job_publisher` tells you which portal it came from.
+// JSearch (RapidAPI, OpenWeb Ninja) — Tier A, and the important one: it
+// aggregates Google for Jobs, which indexes LinkedIn, Indeed, Naukri, Foundit,
+// Glassdoor and the rest. This is how those portals are reached without
+// scraping them: `job_apply_link` is the canonical link Google resolved to,
+// and `job_publisher` says which portal it came from.
 //
-// Free key: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
+// API v5. Two things differ from earlier versions and both were found the hard
+// way against the live API:
+//   * the endpoint is /search-v2, not /search
+//   * results are nested at data.jobs, not data
 import { getJSON } from '../lib/http.js';
 import { keys, hasKey } from '../lib/keys.js';
 
@@ -19,29 +22,34 @@ export function configured() {
 
 export const setupUrl = 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch';
 
-export async function fetchQuery({ term, location = 'India', page = 1, datePosted = 'month' }) {
+const HOST = 'jsearch.p.rapidapi.com';
+
+export async function fetchQuery({ term, location = 'India', page = 1, datePosted = 'month', pages = 1 }) {
   const k = keys().jsearch;
   const q = new URLSearchParams({
     query: `${term} in ${location}`,
     page: String(page),
-    num_pages: '1',
+    num_pages: String(pages),
     country: 'in',
     date_posted: datePosted,
   });
 
-  const res = await getJSON(`https://jsearch.p.rapidapi.com/search?${q}`, {
-    timeout: 25000,
+  const res = await getJSON(`https://${HOST}/search-v2?${q}`, {
+    timeout: 30000,
     headers: {
-      'X-RapidAPI-Key': k.rapidApiKey,
-      'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
+      'x-rapidapi-key': k.rapidApiKey,
+      'x-rapidapi-host': HOST,
     },
   });
 
-  if (!res.ok || !Array.isArray(res.data?.data)) {
-    return { rows: [], error: `jsearch status=${res.status}` };
+  if (!res.ok) return { rows: [], error: `jsearch status=${res.status}` };
+
+  const jobs = res.data?.data?.jobs;
+  if (!Array.isArray(jobs)) {
+    return { rows: [], error: `jsearch: unexpected shape (${Object.keys(res.data?.data || {}).join(',') || 'no data'})` };
   }
 
-  const rows = res.data.data
+  const rows = jobs
     .filter((j) => typeof j.job_apply_link === 'string' && j.job_apply_link)
     .map((j) => ({
       source: id,
@@ -53,14 +61,14 @@ export async function fetchQuery({ term, location = 'India', page = 1, datePoste
       apply_url: j.job_apply_link, // provider-supplied, resolved by Google
       jd_text: j.job_description || '',
       posted_at: j.job_posted_at_datetime_utc || null,
-      employment_type_hint: j.job_employment_type || '',
+      employment_type_hint: j.job_employment_type || (j.job_employment_types || [])[0] || '',
       is_remote: j.job_is_remote === true,
       workplace_type: j.job_is_remote ? 'Remote' : '',
       country: j.job_country || 'IN',
-      // Which Indian portal this actually came from — shown as the source badge.
-      publisher: j.job_publisher || '',
+      // Which portal this actually came from — drives the per-portal reports.
+      publisher: j.job_publisher || (j.job_publishers || [])[0] || '',
       salary_raw: j.job_min_salary
-        ? `${j.job_min_salary}-${j.job_max_salary || j.job_min_salary} ${j.job_salary_currency || ''}`
+        ? `${j.job_min_salary}-${j.job_max_salary || j.job_min_salary} ${j.job_salary_currency || ''}`.trim()
         : '',
     }));
 
