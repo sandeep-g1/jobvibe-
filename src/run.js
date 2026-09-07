@@ -218,7 +218,13 @@ async function main() {
   info(`${above.length}/${scored.length} at or above your floor of ${profile.minScore}`);
 
   above.sort((a, b) => b.result.score - a.result.score);
-  const limited = above.slice(0, profile.dailyLimit ?? 50);
+
+  // Verify a surplus, not exactly dailyLimit. Links are checked after ranking,
+  // so any dead row used to permanently consume a slot -- one bad source once
+  // cut a 60-job report down to 23. Checking extra candidates lets survivors
+  // backfill to the full limit.
+  const limit = profile.dailyLimit ?? 50;
+  const candidates = above.slice(0, Math.min(above.length, limit * 3));
 
   /* ---- 08 verify links ---- */
   stage(8, 'Verify every apply link');
@@ -226,13 +232,16 @@ async function main() {
     Object.entries(ADAPTERS).map(([k, a]) => [k, a.trustLink !== false])
   );
   const counts = await verifyJobs(
-    limited.map((s) => s.job), trustBySource,
+    candidates.map((s) => s.job), trustBySource,
     { onProgress: (d, t) => process.stdout.write(`\r     checking ${d}/${t}...`) }
   );
   process.stdout.write('\r'.padEnd(40) + '\r');
   info(`${counts.ok} OK · ${counts.unverified} unverified · ${counts.dead} dead (excluded)`);
 
-  const alive = limited.filter((s) => s.job.link_status !== STATUS.DEAD);
+  const alive = candidates
+    .filter((s) => s.job.link_status !== STATUS.DEAD)
+    .slice(0, limit);
+  info(`${alive.length} of ${limit} slots filled from ${candidates.length} candidates`);
 
   /* ---- 09b persist matches ---- */
   stage(9, 'Persist matches');

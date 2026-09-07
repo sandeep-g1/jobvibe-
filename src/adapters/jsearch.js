@@ -24,6 +24,30 @@ export const setupUrl = 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch'
 
 const HOST = 'jsearch.p.rapidapi.com';
 
+/**
+ * Publishers whose links do not survive verification.
+ *
+ * Measured, not assumed: of 39 Jobrapido rows checked, 37 returned a genuine
+ * "Error 404 Page Not Found" page even with full browser headers — their
+ * jobpreview URLs expire almost immediately. Because rows are ranked before
+ * links are checked, they also displaced good jobs from the daily limit.
+ *
+ * Re-measure before changing this: if Jobrapido starts serving durable links,
+ * it is a large source of India roles and worth re-admitting.
+ */
+const DEAD_LINK_PUBLISHERS = new Set(['jobrapido']);
+
+function publisherBlocked(pub, url) {
+  const p = String(pub || '').toLowerCase();
+  if ([...DEAD_LINK_PUBLISHERS].some((d) => p.includes(d))) return true;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return [...DEAD_LINK_PUBLISHERS].some((d) => host.includes(d));
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchQuery({ term, location = 'India', page = 1, datePosted = 'month', pages = 1 }) {
   const k = keys().jsearch;
   const q = new URLSearchParams({
@@ -51,6 +75,7 @@ export async function fetchQuery({ term, location = 'India', page = 1, datePoste
 
   const rows = jobs
     .filter((j) => typeof j.job_apply_link === 'string' && j.job_apply_link)
+    .filter((j) => !publisherBlocked(j.job_publisher, j.job_apply_link))
     .map((j) => ({
       source: id,
       source_job_id: String(j.job_id ?? ''),
