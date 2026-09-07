@@ -195,6 +195,23 @@ export async function handler(req, res) {
     return send(res, out.ok ? 200 : 503, 'application/json', JSON.stringify(out, null, 2));
   }
 
+  // Vercel Cron hits this. GitHub's own scheduler is best-effort and has been
+  // running ~4.7 hours late, so the punctual trigger lives here and dispatches
+  // the workflow, which is where the five-minute run can actually execute.
+  if (path === '/api/cron') {
+    const secret = cleanEnv(process.env.CRON_SECRET);
+    const auth = req.headers.authorization || '';
+    const fromVercelCron = !!req.headers['x-vercel-cron'];
+    const authorised = secret ? auth === `Bearer ${secret}` : fromVercelCron;
+
+    if (!authorised) {
+      return send(res, 401, 'application/json', JSON.stringify({ error: 'unauthorised' }));
+    }
+    const out = await startRun();
+    return send(res, out.started ? 202 : 409, 'application/json',
+      JSON.stringify({ ...out, at: new Date().toISOString(), runner: RUNNER }));
+  }
+
   if (!isPostgres && process.env.VERCEL) {
     return send(res, 503, 'text/html; charset=utf-8',
       setupPage('DATABASE_URL is not set in this deployment.'));

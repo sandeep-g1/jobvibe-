@@ -1,9 +1,12 @@
 name: Daily job run
 
+# Vercel Cron is the punctual trigger and dispatches this workflow at 08:00 IST.
+# The schedule below is only a safety net for a day when that dispatch fails:
+# GitHub's own scheduler has been running roughly 4.7 hours late, and the run
+# step skips itself if today's run already happened.
 on:
   schedule:
-    # 02:30 UTC = 08:00 IST
-    - cron: '30 2 * * *'
+    - cron: '0 9 * * *'
   workflow_dispatch: {}
 
 jobs:
@@ -42,4 +45,4 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           SITE_URL: https://jobvibe-green.vercel.app
-        run: npm run run
+        run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || '' }}

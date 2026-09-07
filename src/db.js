@@ -82,6 +82,24 @@ export async function runById(id) {
   return r ? { ...r, id: num(r.id) } : null;
 }
 
+/**
+ * Has a run already completed today, in the given timezone?
+ * Lets a backup trigger exist without producing a second run and a second
+ * email on the same day.
+ */
+export async function runCompletedToday(tzOffsetMinutes = 330) {
+  const d = await db();
+  const rows = await d.query(
+    'SELECT started_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 5'
+  );
+  const localDay = (iso) => {
+    const t = new Date(iso).getTime() + tzOffsetMinutes * 60000;
+    return new Date(t).toISOString().slice(0, 10);
+  };
+  const today = localDay(new Date().toISOString());
+  return rows.some((r) => localDay(r.started_at) === today);
+}
+
 export async function latestRun() {
   const d = await db();
   const r = await d.one(

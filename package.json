@@ -13,7 +13,8 @@
     "db:check": "node --no-warnings src/tools/db-check.js",
     "expand": "node --no-warnings src/tools/expand-registry.js",
     "secrets:push": "node --no-warnings src/tools/push-secrets.js",
-    "email:test": "node --no-warnings src/tools/email-test.js"
+    "email:test": "node --no-warnings src/tools/email-test.js",
+    "gh:token": "node --no-warnings src/tools/push-gh-token.js"
   },
   "engines": {
     "node": ">=22"

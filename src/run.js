@@ -6,6 +6,7 @@ import { ADAPTERS, isUsable, availableQueryAdapters } from './adapters/index.js'
 import {
   initDB, closeDB, ROOT, startRun, finishRun, liveCompanies, upsertJob,
   seenFingerprints, insertMatch, matchesForRun, appliedSet, isPostgres,
+  runCompletedToday,
 } from './db.js';
 import { BOARD_ADAPTERS } from './adapters/index.js';
 const BOARD_IDS = new Set(Object.keys(BOARD_ADAPTERS));
@@ -36,6 +37,20 @@ async function main() {
   }
 
   await initDB();
+
+  // A backup trigger fires later in the day in case the primary one failed.
+  // If today's run already happened, stop here rather than producing a second
+  // report and a second email.
+  if (process.argv.includes('--once-per-day') || process.env.ONCE_PER_DAY === '1') {
+    if (await runCompletedToday()) {
+      console.log('');
+      console.log('  A run already completed today — nothing to do.');
+      console.log('');
+      await closeDB();
+      return;
+    }
+  }
+
   const secrets = await loadSecretsIntoEnv();
   const profile = await loadProfileAsync();
   const runId = await startRun();
