@@ -55,12 +55,16 @@ function pushToVercel(name, value) {
   writeFileSync(tmp, value, { encoding: 'utf8' });
   try {
     for (const env of ['production', 'preview', 'development']) {
+      // shell:true so Windows handles the quoting and the < redirection itself;
+      // passing this through an args array had cmd.exe mangle the quotes.
       const r = spawnSync(
-        'cmd',
-        ['/c', `"${VERCEL}" env add ${name} ${env} --scope ${SCOPE} --force < "${tmp}"`],
-        { encoding: 'utf8' }
+        `"${VERCEL}" env add ${name} ${env} --scope ${SCOPE} --force < "${tmp}"`,
+        { encoding: 'utf8', shell: true }
       );
-      if (r.status !== 0) return `vercel ${env} failed`;
+      if (r.status !== 0) {
+        const last = String(r.stderr || r.stdout || '').trim().split(/\r?\n/).pop();
+        return `vercel ${env} failed (${last || 'exit ' + r.status})`;
+      }
     }
     return 'ok';
   } finally {
