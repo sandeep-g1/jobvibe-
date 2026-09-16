@@ -6,7 +6,7 @@ import { ADAPTERS, isUsable, availableQueryAdapters } from './adapters/index.js'
 import {
   initDB, closeDB, ROOT, startRun, finishRun, liveCompanies, upsertJob,
   seenFingerprints, insertMatch, matchesForRun, appliedSet, isPostgres,
-  runCompletedToday,
+  runCompletedToday, runInProgress,
 } from './db.js';
 import { BOARD_ADAPTERS } from './adapters/index.js';
 const BOARD_IDS = new Set(Object.keys(BOARD_ADAPTERS));
@@ -49,6 +49,17 @@ async function main() {
       await closeDB();
       return;
     }
+  }
+
+  // Two triggers firing together (the cron and a manual "Search jobs now", say)
+  // both ran on 15 Sep: the first took sixty jobs and the second found four.
+  const busy = await runInProgress();
+  if (busy) {
+    console.log('');
+    console.log(`  Run #${busy.id} started at ${busy.started_at} and is still going — not starting another.`);
+    console.log('');
+    await closeDB();
+    return;
   }
 
   const secrets = await loadSecretsIntoEnv();
@@ -98,7 +109,9 @@ async function main() {
     const where = profile.baseCity || 'India';
     const tasks = [];
     for (const { key, adapter } of ready) {
-      for (const term of terms) tasks.push({ key, adapter, term });
+      // Metered sources declare how many searches a run may spend.
+      const budget = adapter.maxTermsPerRun ?? terms.length;
+      for (const term of terms.slice(0, budget)) tasks.push({ key, adapter, term });
     }
     await mapLimit(tasks, 3, async ({ key, adapter, term }) => {
       try {
@@ -224,7 +237,21 @@ async function main() {
   // cut a 60-job report down to 23. Checking extra candidates lets survivors
   // backfill to the full limit.
   const limit = profile.dailyLimit ?? 50;
-  const candidates = above.slice(0, Math.min(above.length, limit * 3));
+  const share = Math.min(1, Math.max(0.1, Number(profile.maxSourceShare ?? 0.4)));
+  const perSourceCap = Math.max(1, Math.floor(limit * share));
+
+  // Build the verification pool per source, not from the overall top. Otherwise
+  // a source that out-scores the rest fills every candidate place and the
+  // per-source cap below has nothing else to choose from.
+  const bySource = new Map();
+  for (const s of above) {
+    const list = bySource.get(s.job.source) || [];
+    if (list.length < perSourceCap * 3) list.push(s);
+    bySource.set(s.job.source, list);
+  }
+  const candidates = [...bySource.values()].flat()
+    .sort((a, b) => b.result.score - a.result.score)
+    .slice(0, limit * 4);
 
   /* ---- 08 verify links ---- */
   stage(8, 'Verify every apply link');
@@ -238,9 +265,28 @@ async function main() {
   process.stdout.write('\r'.padEnd(40) + '\r');
   info(`${counts.ok} OK · ${counts.unverified} unverified · ${counts.dead} dead (excluded)`);
 
-  const alive = candidates
-    .filter((s) => s.job.link_status !== STATUS.DEAD)
-    .slice(0, limit);
+  // No single source may take more than a share of the report. Search-based
+  // sources return only title-matched roles, while company boards return every
+  // opening a company has, so the former out-score the latter by construction:
+  // run #18 was 40 Himalayas, 18 JSearch, 2 Lever and nothing from Greenhouse or
+  // SmartRecruiters. Leftover slots are refilled in score order.
+  const living = candidates.filter((s) => s.job.link_status !== STATUS.DEAD);
+  const taken = new Map();
+  const picked = [];
+  for (const s of living) {
+    if (picked.length >= limit) break;
+    const n = taken.get(s.job.source) || 0;
+    if (n >= perSourceCap) continue;
+    taken.set(s.job.source, n + 1);
+    picked.push(s);
+  }
+  for (const s of living) { // backfill if the caps left the report short
+    if (picked.length >= limit) break;
+    if (!picked.includes(s)) picked.push(s);
+  }
+  picked.sort((a, b) => b.result.score - a.result.score);
+  const alive = picked;
+  info(`source mix: ${[...taken].map(([k, v]) => `${k} ${v}`).join(' · ')} (cap ${perSourceCap} each)`);
   info(`${alive.length} of ${limit} slots filled from ${candidates.length} candidates`);
 
   /* ---- 09b persist matches ---- */
@@ -274,7 +320,10 @@ async function main() {
   // After the report is persisted, so a mail failure can never lose a run.
   stage(11, 'Email the digest');
   const siteUrl = (process.env.SITE_URL || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
-  const digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
+  // --no-email for test runs: every manual run otherwise mails the real recipients.
+  const digest = process.argv.includes('--no-email')
+    ? { sent: false, reason: '--no-email flag' }
+    : await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
   info(digest.sent
     ? `sent to ${digest.to.join(', ')}${digest.cc?.length ? ` (cc ${digest.cc.join(', ')})` : ''}`
     : `skipped — ${digest.reason}`);

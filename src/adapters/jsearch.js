@@ -25,6 +25,13 @@ export const setupUrl = 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch'
 const HOST = 'jsearch.p.rapidapi.com';
 
 /**
+ * The free plan is 200 requests a month, hard-limited. Six searches a day plus
+ * retries on its frequent timeouts would exhaust that around day 20 and fail
+ * for the rest of the cycle. Three searches, no retries: ~90 a month.
+ */
+export const maxTermsPerRun = 3;
+
+/**
  * Publishers whose links do not survive verification.
  *
  * Measured, not assumed: of 39 Jobrapido rows checked, 37 returned a genuine
@@ -59,7 +66,8 @@ export async function fetchQuery({ term, location = 'India', page = 1, datePoste
   });
 
   const res = await getJSON(`https://${HOST}/search-v2?${q}`, {
-    timeout: 30000,
+    timeout: 45000,
+    retries: 0, // a retry is a second billed request
     headers: {
       'x-rapidapi-key': k.rapidApiKey,
       'x-rapidapi-host': HOST,

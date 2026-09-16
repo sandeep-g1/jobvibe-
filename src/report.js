@@ -15,7 +15,7 @@ const SOURCE_LABEL = {
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',
-  smartrecruiters: 'SmartRecruiters',
+  smartrecruiters: 'SmartRecruiters', himalayas: 'Himalayas',
 };
 
 function daysAgo(iso) {

@@ -100,6 +100,20 @@ export async function runCompletedToday(tzOffsetMinutes = 330) {
   return rows.some((r) => localDay(r.started_at) === today);
 }
 
+/**
+ * Is another run already in flight? A run that crashed never records
+ * finished_at, so only runs started within the window count as live.
+ */
+export async function runInProgress(windowMinutes = 30) {
+  const d = await db();
+  const since = new Date(Date.now() - windowMinutes * 60000).toISOString();
+  const r = await d.one(
+    'SELECT id, started_at FROM runs WHERE finished_at IS NULL AND started_at > ? ORDER BY id DESC LIMIT 1',
+    [since]
+  );
+  return r ? { ...r, id: num(r.id) } : null;
+}
+
 export async function latestRun() {
   const d = await db();
   const r = await d.one(

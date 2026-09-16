@@ -988,6 +988,14 @@
     {
       "name": "Uni Cards",
       "slug": "unicards"
+    },
+    {
+      "name": "IMT Care",
+      "slug": "imt"
+    },
+    {
+      "name": "Raven",
+      "slug": "raven"
     }
   ],
   "lever": [
@@ -1362,6 +1370,10 @@
     {
       "name": "Innovaccer Inc",
       "slug": "innovaccerinc"
+    },
+    {
+      "name": "FamPay",
+      "slug": "fampay"
     }
   ],
   "ashby": [
@@ -1664,6 +1676,18 @@
     {
       "name": "Krutrim",
       "slug": "krutrim"
+    },
+    {
+      "name": "Rivia.AI",
+      "slug": "rivia"
+    },
+    {
+      "name": "Bolna AI",
+      "slug": "bolna"
+    },
+    {
+      "name": "Cardboard",
+      "slug": "cardboard"
     }
   ],
   "smartrecruiters": [

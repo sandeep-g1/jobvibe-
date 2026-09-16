@@ -67,8 +67,13 @@ export async function verifyJobs(jobs, trustBySource, { concurrency = 8, onProgr
   const counts = { ok: 0, unverified: 0, dead: 0 };
 
   await mapLimit(jobs, concurrency, async (job) => {
-    const res = await verifyLink(job.apply_url, { trusted: !!trustBySource[job.source] });
-    setLinkStatus(job.id, res.status, res.finalUrl);
+    // Some sources prove liveness themselves (a job listed in their API today and
+    // not expired), and put their pages behind a browser challenge a script
+    // cannot pass. Probing those would only ever say 403.
+    const res = job.verified_by_source
+      ? { status: STATUS.OK, finalUrl: job.apply_url, code: 200 }
+      : await verifyLink(job.apply_url, { trusted: !!trustBySource[job.source] });
+    await setLinkStatus(job.id, res.status, res.finalUrl);
     job.link_status = res.status;
     job.final_url = res.finalUrl;
 
