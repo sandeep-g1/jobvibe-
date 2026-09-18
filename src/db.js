@@ -305,6 +305,11 @@ export async function upsertJob(j) {
   return { id: num(id), isNew: true };
 }
 
+export async function jobByFingerprint(fp) {
+  const d = await db();
+  return d.one('SELECT * FROM jobs WHERE fingerprint = ?', [fp]);
+}
+
 export async function setLinkStatus(jobId, status, finalUrl) {
   const d = await db();
   await d.run('UPDATE jobs SET link_status=?, final_url=?, link_checked_at=? WHERE id=?',

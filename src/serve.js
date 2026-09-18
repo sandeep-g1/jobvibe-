@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -26,6 +26,7 @@ import { onboardingPage } from './web/onboarding.js';
 import { extractText } from './lib/resume.js';
 import { parseResume, geminiConfigured } from './lib/gemini.js';
 import Busboy from 'busboy';
+import { tailorResume } from './lib/tailor.js';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
@@ -347,6 +348,37 @@ export async function handler(req, res) {
       await loadSecretsIntoEnv();
       res.writeHead(303, { Location: `/settings?saved=1&keys=${changed}` });
       return res.end();
+    }
+
+    if (path === '/api/tailor' && req.method === 'POST') {
+      const form = await readForm(req);
+      const fp = form.fingerprint;
+      const j = fp ? await jobByFingerprint(fp) : null;
+      if (!j) return send(res, 404, 'application/json', '{"error":"job not found"}');
+
+      const resume = await defaultResume(uid);
+      if (!resume || !resume.content_b64) {
+        return send(res, 400, 'application/json',
+          JSON.stringify({ error: 'Upload your CV first (Settings → Your CV).' }));
+      }
+      if (resume.kind !== 'docx') {
+        return send(res, 400, 'application/json',
+          JSON.stringify({ error: 'Tailoring needs a .docx CV. Re-upload as .docx to enable it.' }));
+      }
+      const p = await profile(uid);
+      const r = await tailorResume(Buffer.from(resume.content_b64, 'base64'), j, p.skillBank || []);
+      if (!r.ok) return send(res, 502, 'application/json', JSON.stringify({ error: r.error }));
+
+      const safe = (s2) => String(s2 || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+      const fname = `${safe(p.name || 'Resume')}_${safe(j.company)}_${safe(j.title)}.docx`;
+      res.writeHead(200, {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': `attachment; filename="${fname}"`,
+        'X-Tailor-Changed': String(r.changed),
+        'X-Tailor-Gaps': encodeURIComponent((r.gaps || []).join(', ')),
+        'Cache-Control': 'no-store',
+      });
+      return res.end(r.buffer);
     }
 
     if (path === '/api/run' && req.method === 'POST') {

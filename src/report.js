@@ -157,6 +157,9 @@ function html(rows, { profile, runId, errors, perSource, date }) {
 
   .btn-apply { display:inline-block; background:#0a66c2; color:#fff; padding:6px 14px; border-radius:6px; text-decoration:none; font-size:.78rem; font-weight:600; white-space:nowrap; }
   .btn-apply:hover { background:#084fa1; }
+  .btn-tailor { display:inline-block; background:#fff; color:#0a66c2; border:1.5px solid #0a66c2; padding:5px 12px; border-radius:6px; font-size:.78rem; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn-tailor:hover { background:#eef4fc; }
+  .btn-tailor:disabled { opacity:.6; cursor:default; }
   .btn-applied { background:#e8f5e9; color:#2e7d32; padding:5px 10px; border-radius:6px; font-size:.75rem; font-weight:600; border:1.5px solid #4caf50; cursor:pointer; white-space:nowrap; }
   .btn-applied:hover { background:#ffebee; color:#c62828; border-color:#ef5350; }
   .applied-tag { background:#e8f5e9; color:#2e7d32; font-size:.68rem; padding:2px 7px; border-radius:10px; font-weight:600; border:1px solid #a5d6a7; }
@@ -242,7 +245,7 @@ ${top.length ? `<div class="priority-panel">
   <thead><tr>
     <th>#</th><th>Job Title</th><th>Company</th><th>Match</th><th>Recommendation</th>
     <th>Mode</th><th>Exp</th><th>Posted</th><th>Competition</th>
-    <th>Skills matched / missing</th><th>Why</th><th>Applied</th><th>Apply ↗</th>
+    <th>Skills matched / missing</th><th>Why</th><th>Applied</th><th>Tailor CV</th><th>Apply ↗</th>
   </tr></thead>
   <tbody id="jobTableBody"></tbody>
 </table>
@@ -313,6 +316,7 @@ function render(){
       '</div></td>'+
       '<td><span class="why-note">'+esc(j.why)+'</span></td>'+
       '<td><button class="btn-applied" onclick="toggleApplied(\\''+j.fingerprint+'\\')">'+(isApplied?'↩ Undo':'✓ Applied')+'</button></td>'+
+      '<td><button class="btn-tailor" onclick="tailorCV(this,\\''+j.fingerprint+'\\')">Tailor</button></td>'+
       '<td><a href="'+esc(j.url)+'" target="_blank" rel="noopener" class="btn-apply">Apply ↗</a></td>';
     tb.appendChild(tr);
   }
@@ -320,6 +324,35 @@ function render(){
 }
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function tailorCV(btn, fp){
+  var old = btn.textContent; btn.disabled = true; btn.textContent = 'Tailoring…';
+  try {
+    var res = await fetch('/api/tailor', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'fingerprint='+encodeURIComponent(fp)
+    });
+    if (!res.ok) {
+      var e = await res.json().catch(function(){return {error:'Failed'};});
+      alert(e.error || 'Could not tailor the CV.');
+      btn.disabled = false; btn.textContent = old; return;
+    }
+    var blob = await res.blob();
+    var name = 'Resume.docx';
+    var cd = res.headers.get('Content-Disposition') || '';
+    var mm = cd.match(/filename="([^"]+)"/); if (mm) name = mm[1];
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    var changed = res.headers.get('X-Tailor-Changed') || '?';
+    var gaps = decodeURIComponent(res.headers.get('X-Tailor-Gaps') || '');
+    btn.textContent = '✓ Downloaded';
+    if (gaps) setTimeout(function(){ alert('Tailored '+changed+' lines. Skills the JD wants that are NOT on your CV (not added): '+gaps); }, 300);
+    setTimeout(function(){ btn.disabled=false; btn.textContent=old; }, 4000);
+  } catch (err) {
+    alert('Error: '+err.message); btn.disabled=false; btn.textContent=old;
+  }
+}
 
 async function toggleApplied(fp){
   applied[fp] = !applied[fp];
