@@ -61,7 +61,7 @@ function renderField(f, profile) {
   }
 
   if (f.type === 'toggle') {
-    const on = val !== false;
+    const on = f.key === 'scheduleActive' ? val === true : val !== false;
     return `<div class="fld"><label class="chk" style="font-weight:600">` +
       `<input type="checkbox" name="${esc(f.key)}"${on ? ' checked' : ''}> ${esc(f.label)}</label>${help}</div>`;
   }

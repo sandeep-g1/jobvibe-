@@ -50,9 +50,9 @@ export async function liveCompanies(sources) {
 
 /* ---------------- runs ---------------- */
 
-export async function startRun() {
+export async function startRun(userId = 'local') {
   const d = await db();
-  return num(await d.insertReturningId('INSERT INTO runs (started_at) VALUES (?)', [now()]));
+  return num(await d.insertReturningId('INSERT INTO runs (user_id, started_at) VALUES (?,?)', [userId, now()]));
 }
 
 export async function finishRun(runId, stats) {
@@ -67,18 +67,21 @@ export async function finishRun(runId, stats) {
   );
 }
 
-export async function allRuns() {
+export async function allRuns(userId = 'local') {
   const d = await db();
   const rows = await d.query(
     `SELECT r.*, (SELECT COUNT(*) FROM job_matches m WHERE m.run_id = r.id) AS rows_now
-       FROM runs r WHERE r.finished_at IS NOT NULL ORDER BY r.id DESC`
+       FROM runs r WHERE r.finished_at IS NOT NULL AND r.user_id = ? ORDER BY r.id DESC`,
+    [userId]
   );
   return rows.map((r) => ({ ...r, id: num(r.id) }));
 }
 
-export async function runById(id) {
+export async function runById(id, userId = null) {
   const d = await db();
-  const r = await d.one('SELECT * FROM runs WHERE id = ?', [id]);
+  const r = userId
+    ? await d.one('SELECT * FROM runs WHERE id = ? AND user_id = ?', [id, userId])
+    : await d.one('SELECT * FROM runs WHERE id = ?', [id]);
   return r ? { ...r, id: num(r.id) } : null;
 }
 
@@ -114,10 +117,11 @@ export async function runInProgress(windowMinutes = 30) {
   return r ? { ...r, id: num(r.id) } : null;
 }
 
-export async function latestRun() {
+export async function latestRun(userId = 'local') {
   const d = await db();
   const r = await d.one(
-    'SELECT * FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1'
+    'SELECT * FROM runs WHERE finished_at IS NOT NULL AND user_id = ? ORDER BY id DESC LIMIT 1',
+    [userId]
   );
   return r ? { ...r, id: num(r.id) } : null;
 }
@@ -143,6 +147,58 @@ export async function latestIngest() {
   const d = await db();
   const r = await d.one('SELECT * FROM ingest_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1');
   return r ? { ...r, id: num(r.id) } : null;
+}
+
+/* ---------------- auth: users & sessions ---------------- */
+
+export async function createUserRow({ id, email, passwordHash, displayName }) {
+  const d = await db();
+  await d.run(
+    `INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?,?,?,?,?)`,
+    [id, email, passwordHash, displayName ?? null, now()]
+  );
+}
+
+export async function userByEmail(email) {
+  const d = await db();
+  return d.one('SELECT * FROM users WHERE email = ?', [String(email).toLowerCase()]);
+}
+
+export async function userById(id) {
+  const d = await db();
+  return d.one('SELECT id, email, display_name, is_admin, created_at FROM users WHERE id = ?', [id]);
+}
+
+export async function touchLogin(id) {
+  const d = await db();
+  await d.run('UPDATE users SET last_login_at = ? WHERE id = ?', [now(), id]);
+}
+
+export async function userCount() {
+  const d = await db();
+  return num((await d.one('SELECT COUNT(*) AS c FROM users')).c);
+}
+
+export async function createSession({ token, userId, expiresAt }) {
+  const d = await db();
+  await d.run('INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?,?,?,?)',
+    [token, userId, now(), expiresAt]);
+}
+
+export async function sessionUser(token) {
+  const d = await db();
+  const row = await d.one(
+    `SELECT u.id, u.email, u.display_name, u.is_admin
+       FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token = ? AND s.expires_at > ?`,
+    [token, now()]
+  );
+  return row || null;
+}
+
+export async function deleteSession(token) {
+  const d = await db();
+  await d.run('DELETE FROM sessions WHERE token = ?', [token]);
 }
 
 /* ---------------- profiles: multi-user ---------------- */
@@ -353,29 +409,30 @@ export async function saveProfileRow(profile, userId = 'local') {
 
 /* ---------------- dashboard ---------------- */
 
-export async function dashboardStats() {
+export async function dashboardStats(userId = 'local') {
   const d = await db();
   const c = async (sql, p = []) => num((await d.one(sql, p))?.c ?? 0);
+  const U = [userId];
 
   return {
-    runs: await c('SELECT COUNT(*) AS c FROM runs WHERE finished_at IS NOT NULL'),
+    runs: await c('SELECT COUNT(*) AS c FROM runs WHERE finished_at IS NOT NULL AND user_id = ?', U),
     jobs: await c('SELECT COUNT(*) AS c FROM jobs'),
-    shown: await c('SELECT COUNT(*) AS c FROM job_matches'),
-    applied: await c('SELECT COUNT(*) AS c FROM applications'),
+    shown: await c('SELECT COUNT(*) AS c FROM job_matches WHERE user_id = ?', U),
+    applied: await c('SELECT COUNT(*) AS c FROM applications WHERE user_id = ?', U),
     boards: await c("SELECT COUNT(*) AS c FROM companies WHERE board_status='live'"),
     indiaJobs: await c("SELECT COALESCE(SUM(last_india),0) AS c FROM companies WHERE board_status='live'"),
-    avgScore: Math.round(await c('SELECT COALESCE(AVG(score),0) AS c FROM job_matches')),
-    topScore: await c('SELECT COALESCE(MAX(score),0) AS c FROM job_matches'),
-    byRec: await d.query('SELECT recommendation AS r, COUNT(*) AS c FROM job_matches GROUP BY recommendation'),
+    avgScore: Math.round(await c('SELECT COALESCE(AVG(score),0) AS c FROM job_matches WHERE user_id = ?', U)),
+    topScore: await c('SELECT COALESCE(MAX(score),0) AS c FROM job_matches WHERE user_id = ?', U),
+    byRec: await d.query('SELECT recommendation AS r, COUNT(*) AS c FROM job_matches WHERE user_id = ? GROUP BY recommendation', U),
     bySource: await d.query(
       `SELECT j.source AS s, COUNT(*) AS c FROM job_matches m JOIN jobs j ON j.id=m.job_id
-        GROUP BY j.source ORDER BY c DESC`
+        WHERE m.user_id = ? GROUP BY j.source ORDER BY c DESC`, U
     ),
     topCompanies: await d.query(
       `SELECT j.company AS c, COUNT(*) AS n FROM job_matches m JOIN jobs j ON j.id=m.job_id
-        GROUP BY j.company ORDER BY n DESC LIMIT 8`
+        WHERE m.user_id = ? GROUP BY j.company ORDER BY n DESC LIMIT 8`, U
     ),
-    topMissing: await d.query('SELECT skills_missing FROM job_matches'),
+    topMissing: await d.query('SELECT skills_missing FROM job_matches WHERE user_id = ?', U),
   };
 }
 

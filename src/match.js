@@ -27,7 +27,7 @@ const log = (m) => console.log(`  match · ${m}`);
 export async function runMatch(userId, { email = true, profile: pre } = {}) {
   const profile = pre || await loadProfileAsync(userId);
   profile.userId = userId;
-  const runId = await startRun();
+  const runId = await startRun(userId);
 
   // Candidate pool: fresh, not-dead, unseen by this user.
   const poolRows = await candidateJobsForUser(userId, { days: 10 });

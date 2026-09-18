@@ -102,6 +102,12 @@ function nav(active, extra = '') {
 </div>`;
 }
 
+export function userChip(user) {
+  if (!user) return '';
+  const who = esc(user.display_name || user.email || '');
+  return `${who} · <a href="/logout" style="color:#0a66c2;text-decoration:none;font-weight:600">Sign out</a>`;
+}
+
 export function layout({ title, active, body, navExtra = '' }) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -122,9 +128,9 @@ ${body}
 /*  Dashboard                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function dashboardPage(profile, sourceStatus) {
-  const s = await dashboardStats();
-  const runs = await allRuns();
+export async function dashboardPage(profile, sourceStatus, userId = 'local', user = null) {
+  const s = await dashboardStats(userId);
+  const runs = await allRuns(userId);
   const latest = runs[0];
 
   // Most-demanded skills you don't have — the Phase 5 gap-review queue, previewed.
@@ -231,15 +237,15 @@ export async function dashboardPage(profile, sourceStatus) {
   </div>
 </div>`;
 
-  return layout({ title: `${profile.name} — Dashboard`, active: 'dash', body });
+  return layout({ title: `${esc(profile.name)} — Dashboard`, active: 'dash', body, navExtra: userChip(user) });
 }
 
 /* ------------------------------------------------------------------ */
 /*  Reports index                                                      */
 /* ------------------------------------------------------------------ */
 
-export async function reportsPage(profile) {
-  const runs = await allRuns();
+export async function reportsPage(profile, userId = 'local') {
+  const runs = await allRuns(userId);
 
   const body = `
 <div class="hero">

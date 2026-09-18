@@ -16,6 +16,11 @@ import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED } from './lib/sec
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
 import { loadProfileAsync, FIELDS, normaliseProfile } from './lib/profile.js';
+import {
+  currentUser, signup, login, startSession, endSession,
+  sessionCookie, clearCookie,
+} from './lib/auth.js';
+import { loginPage, signupPage } from './web/auth.js';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
@@ -25,7 +30,7 @@ function send(res, code, type, body) {
   res.end(body);
 }
 
-const profile = () => loadProfileAsync();
+const profile = (userId = 'local') => loadProfileAsync(userId);
 
 /** Where can a search actually be started from? */
 const RUNNER = process.env.VERCEL
@@ -112,32 +117,6 @@ function sourceStatus(p) {
   return [...boards, ...queries];
 }
 
-/** Optional password gate — required before this is exposed publicly. */
-function authorised(req) {
-  if (!PASSWORD) return true;
-  const cookie = req.headers.cookie || '';
-  if (cookie.includes(`sl_auth=${PASSWORD}`)) return true;
-  const url = new URL(req.url, 'http://x');
-  return url.searchParams.get('pw') === PASSWORD;
-}
-
-function loginPage() {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign in — Shortlist India</title>
-<style>body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;display:flex;align-items:center;
-justify-content:center;min-height:100vh;margin:0}
-form{background:#fff;padding:34px;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.08);width:320px}
-h1{font-size:1.15rem;margin:0 0 6px;color:#0a66c2}p{color:#667085;font-size:.84rem;margin:0 0 18px}
-input{width:100%;padding:10px 13px;border:1.5px solid #d0d5dd;border-radius:8px;font-size:.92rem;margin-bottom:12px}
-button{width:100%;padding:10px;background:#0a66c2;color:#fff;border:0;border-radius:8px;
-font-size:.9rem;font-weight:600;cursor:pointer}</style></head>
-<body><form method="GET" action="/"><h1>Shortlist India</h1>
-<p>This dashboard is private. Enter your password.</p>
-<input type="password" name="pw" placeholder="Password" autofocus>
-<button type="submit">Sign in</button></form></body></html>`;
-}
-
 /**
  * A deploy with no DATABASE_URL would otherwise fall over with a stack trace.
  * Say what is wrong and where to fix it instead.
@@ -219,13 +198,44 @@ export async function handler(req, res) {
       setupPage('DATABASE_URL is not set in this deployment.'));
   }
 
-  if (!authorised(req)) return send(res, 401, 'text/html; charset=utf-8', loginPage());
-
-  // Set the auth cookie once the password arrives as a query param.
-  const pw = url.searchParams.get('pw');
-  if (PASSWORD && pw === PASSWORD) {
-    res.setHeader('Set-Cookie', `sl_auth=${PASSWORD}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`);
+  // ---- public auth routes ----
+  if (path === '/login' && req.method === 'GET') {
+    return send(res, 200, 'text/html; charset=utf-8', loginPage());
   }
+  if (path === '/signup' && req.method === 'GET') {
+    return send(res, 200, 'text/html; charset=utf-8', signupPage());
+  }
+  if (path === '/login' && req.method === 'POST') {
+    const form = await readForm(req);
+    const r = await login({ email: form.email, password: form.password });
+    if (!r.ok) return send(res, 401, 'text/html; charset=utf-8', loginPage({ error: r.error, email: form.email }));
+    const { token, expires } = await startSession(r.userId);
+    res.writeHead(303, { Location: '/', 'Set-Cookie': sessionCookie(token, expires) });
+    return res.end();
+  }
+  if (path === '/signup' && req.method === 'POST') {
+    const form = await readForm(req);
+    const r = await signup({ email: form.email, password: form.password, name: form.name });
+    if (!r.ok) return send(res, 400, 'text/html; charset=utf-8', signupPage({ error: r.error, email: form.email, name: form.name }));
+    const { token, expires } = await startSession(r.userId);
+    res.writeHead(303, { Location: '/settings?welcome=1', 'Set-Cookie': sessionCookie(token, expires) });
+    return res.end();
+  }
+  if (path === '/logout') {
+    const u = await currentUser(req).catch(() => null);
+    const sid = (req.headers.cookie || '').split(';').map((c) => c.trim()).find((c) => c.startsWith('sid='));
+    if (sid) await endSession(sid.slice(4));
+    res.writeHead(303, { Location: '/login', 'Set-Cookie': clearCookie() });
+    return res.end();
+  }
+
+  // ---- everything below requires a session ----
+  const user = await currentUser(req);
+  if (!user) {
+    res.writeHead(303, { Location: '/login' });
+    return res.end();
+  }
+  const uid = user.id;
 
   try {
     /* ---- API ---- */
@@ -236,7 +246,7 @@ export async function handler(req, res) {
         try {
           const { fingerprint } = JSON.parse(body);
           if (!fingerprint) return send(res, 400, 'application/json', '{"error":"fingerprint required"}');
-          toggleApplied(fingerprint)
+          toggleApplied(fingerprint, uid)
             .then((out) => send(res, 200, 'application/json', JSON.stringify(out)))
             .catch((e) => send(res, 500, 'application/json', JSON.stringify({ error: e.message })));
         } catch (e) {
@@ -247,21 +257,21 @@ export async function handler(req, res) {
     }
 
     if (path === '/api/runs') {
-      return send(res, 200, 'application/json', JSON.stringify(await allRuns(), null, 2));
+      return send(res, 200, 'application/json', JSON.stringify(await allRuns(uid), null, 2));
     }
 
     /* ---- pages ---- */
     if (path === '/') {
-      const p = await profile();
-      return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p)));
+      const p = await profile(uid);
+      return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p), uid, user));
     }
 
     if (path === '/settings' && req.method === 'GET') {
-      const p = await profile();
+      const p = await profile(uid);
       return send(res, 200, 'text/html; charset=utf-8',
         settingsPage(p, FIELDS, {
           runner: RUNNER,
-          lastRun: await latestRun(),
+          lastRun: await latestRun(uid),
           emailNote: emailConfigured()
             ? 'Mail is configured. A digest is sent after every search.'
             : 'No mail provider yet — set RESEND_API_KEY and these addresses start receiving reports.',
@@ -272,9 +282,10 @@ export async function handler(req, res) {
 
     if (path === '/settings' && req.method === 'POST') {
       const form = await readForm(req);
-      const previous = await profile();
+      const previous = await profile(uid);
       const merged = normaliseProfile(form, previous);
-      await saveProfileRow(merged);
+      merged.userId = uid;
+      await saveProfileRow(merged, uid);
       res.writeHead(303, { Location: '/settings?saved=1' });
       return res.end();
     }
@@ -294,26 +305,26 @@ export async function handler(req, res) {
     }
 
     if (path === '/api/run' && req.method === 'POST') {
-      const knownRuns = (await allRuns()).length;
+      const knownRuns = (await allRuns(uid)).length;
       const out = await startRun();
       return send(res, out.started ? 202 : 409, 'application/json',
         JSON.stringify({ ...out, knownRuns, runner: RUNNER }));
     }
 
     if (path === '/reports') {
-      return send(res, 200, 'text/html; charset=utf-8', await reportsPage(await profile()));
+      return send(res, 200, 'text/html; charset=utf-8', await reportsPage(await profile(uid), uid));
     }
 
     const m = path.match(/^\/reports\/(latest|\d+)$/);
     if (m) {
-      const run = m[1] === 'latest' ? await latestRun() : await runById(Number(m[1]));
+      const run = m[1] === 'latest' ? await latestRun(uid) : await runById(Number(m[1]), uid);
       if (!run) {
         return send(res, 404, 'text/html; charset=utf-8',
           notFoundPage(`No report #${m[1]} exists yet.`));
       }
-      const rows = buildRows(await matchesForRun(run.id), await appliedSet());
+      const rows = buildRows(await matchesForRun(run.id), await appliedSet(uid));
       const html = renderReport(rows, {
-        profile: await profile(),
+        profile: await profile(uid),
         runId: run.id,
         errors: JSON.parse(run.errors || '[]'),
         perSource: JSON.parse(run.per_source || '{}'),

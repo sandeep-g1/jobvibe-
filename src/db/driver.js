@@ -82,6 +82,9 @@ async function initSqlite() {
     },
     async migrate() {
       db.exec(SCHEMA_SQLITE);
+      // Best-effort column adds for pre-existing tables (SQLite has no
+      // ADD COLUMN IF NOT EXISTS, so a duplicate throws and is ignored).
+      for (const stmt of MIGRATIONS) { try { db.exec(stmt); } catch { /* already applied */ } }
     },
     async close() {
       db.close();
@@ -138,6 +141,10 @@ async function initPostgres() {
     },
     async migrate() {
       await pool.query(SCHEMA_POSTGRES);
+      for (const stmt of MIGRATIONS) {
+        try { await pool.query(stmt.replace(/ADD COLUMN /i, 'ADD COLUMN IF NOT EXISTS ')); }
+        catch { /* already applied */ }
+      }
     },
     async close() {
       await pool.end();
@@ -166,6 +173,7 @@ const TABLES = (pk, json) => `
 
   CREATE TABLE IF NOT EXISTS runs (
     id             ${pk},
+    user_id        TEXT NOT NULL DEFAULT 'local',
     started_at     TEXT NOT NULL,
     finished_at    TEXT,
     per_source     ${json},
@@ -229,6 +237,25 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name  TEXT,
+    is_admin      INTEGER DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    last_login_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token      TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
   CREATE TABLE IF NOT EXISTS ingest_runs (
     id            ${pk},
     started_at    TEXT NOT NULL,
@@ -284,6 +311,11 @@ const TABLES = (pk, json) => `
 
 const SCHEMA_SQLITE = TABLES('INTEGER PRIMARY KEY', 'TEXT');
 const SCHEMA_POSTGRES = TABLES('BIGSERIAL PRIMARY KEY', 'TEXT');
+
+// Idempotent column adds for tables that predate a new column.
+const MIGRATIONS = [
+  "ALTER TABLE runs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'",
+];
 
 /* ------------------------------------------------------------------ */
 
