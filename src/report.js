@@ -160,6 +160,25 @@ function html(rows, { profile, runId, errors, perSource, date }) {
   .btn-tailor { display:inline-block; background:#fff; color:#0a66c2; border:1.5px solid #0a66c2; padding:5px 12px; border-radius:6px; font-size:.78rem; font-weight:600; cursor:pointer; white-space:nowrap; }
   .btn-tailor:hover { background:#eef4fc; }
   .btn-tailor:disabled { opacity:.6; cursor:default; }
+  .gap-panel { position:fixed; right:20px; bottom:20px; width:340px; max-width:calc(100vw - 40px);
+    background:#fff; border:1px solid #e0e6ef; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.18);
+    z-index:2000; overflow:hidden; }
+  .gap-head { display:flex; align-items:center; justify-content:space-between; padding:12px 16px;
+    background:#f8fafc; border-bottom:1px solid #eef0f4; font-size:.9rem; color:#1a1a2e; }
+  .gap-head button { border:0; background:transparent; font-size:1.2rem; line-height:1; cursor:pointer; color:#8a94a6; }
+  .gap-body { padding:14px 16px; }
+  .gap-body p { font-size:.82rem; color:#475467; margin-bottom:10px; line-height:1.5; }
+  .gap-chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .gap-chip { display:inline-flex; align-items:center; gap:7px; background:#fff7ed; color:#9a3412;
+    border:1px solid #fed7aa; border-radius:18px; padding:5px 12px; font-size:.8rem; font-weight:600; cursor:pointer; }
+  .gap-chip em { font-style:normal; color:#0a66c2; font-weight:700; }
+  .gap-chip:hover { background:#ffedd5; }
+  .gap-chip.added { background:#dcfce7; color:#166534; border-color:#a7e3bf; cursor:default; }
+  .gap-chip.added em { color:#166534; }
+  .toast { position:fixed; left:50%; bottom:26px; transform:translate(-50%,20px); background:#111827; color:#fff;
+    padding:11px 18px; border-radius:10px; font-size:.85rem; font-weight:500; box-shadow:0 8px 30px rgba(0,0,0,.25);
+    opacity:0; transition:opacity .35s, transform .35s; z-index:2100; max-width:calc(100vw - 40px); }
+  .toast.show { opacity:1; transform:translate(-50%,0); }
   .btn-applied { background:#e8f5e9; color:#2e7d32; padding:5px 10px; border-radius:6px; font-size:.75rem; font-weight:600; border:1.5px solid #4caf50; cursor:pointer; white-space:nowrap; }
   .btn-applied:hover { background:#ffebee; color:#c62828; border-color:#ef5350; }
   .applied-tag { background:#e8f5e9; color:#2e7d32; font-size:.68rem; padding:2px 7px; border-radius:10px; font-weight:600; border:1px solid #a5d6a7; }
@@ -317,10 +336,77 @@ function render(){
       '<td><span class="why-note">'+esc(j.why)+'</span></td>'+
       '<td><button class="btn-applied" onclick="toggleApplied(\\''+j.fingerprint+'\\')">'+(isApplied?'↩ Undo':'✓ Applied')+'</button></td>'+
       '<td><button class="btn-tailor" onclick="tailorCV(this,\\''+j.fingerprint+'\\')">Tailor</button></td>'+
-      '<td><a href="'+esc(j.url)+'" target="_blank" rel="noopener" class="btn-apply">Apply ↗</a></td>';
+      '<td><a href="'+esc(j.url)+'" target="_blank" rel="noopener" class="btn-apply" onclick="applyJob(\\''+j.fingerprint+'\\')">Apply ↗</a></td>';
     tb.appendChild(tr);
   }
   document.getElementById('resultsInfo').textContent = 'Showing ' + n + ' job' + (n===1?'':'s');
+}
+
+// ---- one-click apply: mark applied + copy contact details to paste ----
+async function applyJob(fp){
+  try {
+    var res = await fetch('/api/apply', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'fingerprint='+encodeURIComponent(fp)
+    });
+    var j = await res.json();
+    if (j.ok) {
+      var c = j.contact || {};
+      var line = [c.name, c.email, c.phone].filter(Boolean).join('  ·  ');
+      if (line && navigator.clipboard) { try { await navigator.clipboard.writeText(line); } catch(e){} }
+      var appliedFps2 = window.__applied || (window.__applied = {});
+      appliedFps2[fp] = true;
+      toast('Marked applied' + (line ? ' — your details are copied, ready to paste.' : '.'));
+    }
+  } catch (e) { /* navigation still proceeds */ }
+  return true; // let the link open the apply page in the new tab
+}
+
+// ---- skill-gap review: add a JD skill you actually have to your skill bank ----
+function showGapPanel(changed, gaps){
+  var old = document.getElementById('gapPanel'); if (old) old.remove();
+  var p = document.createElement('div'); p.id = 'gapPanel'; p.className = 'gap-panel';
+  var head = document.createElement('div'); head.className = 'gap-head';
+  head.innerHTML = '<b>Tailored '+esc(changed)+' line'+(changed==='1'?'':'s')+'.</b>'+
+    '<button onclick="document.getElementById(\\'gapPanel\\').remove()" aria-label="Close">×</button>';
+  p.appendChild(head);
+  var body = document.createElement('div'); body.className = 'gap-body';
+  if (!gaps.length) {
+    body.innerHTML = '<p>Every skill this job asked for is already on your CV. 🎉</p>';
+  } else {
+    var intro = document.createElement('p');
+    intro.innerHTML = 'This job wanted skills not on your CV. If you genuinely have one, add it to '+
+      'your skill bank so future tailoring can use it:';
+    body.appendChild(intro);
+    var wrap = document.createElement('div'); wrap.className = 'gap-chips';
+    gaps.forEach(function(g){
+      var b = document.createElement('button'); b.className = 'gap-chip';
+      b.innerHTML = '<span>'+esc(g)+'</span> <em>＋ I have this</em>';
+      b.onclick = function(){ addSkill(g, b); };
+      wrap.appendChild(b);
+    });
+    body.appendChild(wrap);
+  }
+  p.appendChild(body);
+  document.body.appendChild(p);
+}
+async function addSkill(skill, btn){
+  btn.disabled = true;
+  try {
+    var res = await fetch('/api/skills/add', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'skill='+encodeURIComponent(skill)
+    });
+    var j = await res.json();
+    if (j.ok) { btn.classList.add('added'); btn.innerHTML = '<span>'+esc(skill)+'</span> <em>✓ added</em>'; }
+    else { btn.disabled = false; }
+  } catch(e){ btn.disabled = false; }
+}
+function toast(msg){
+  var t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){ t.classList.add('show'); }, 10);
+  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ t.remove(); }, 400); }, 4000);
 }
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -345,9 +431,10 @@ async function tailorCV(btn, fp){
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     var changed = res.headers.get('X-Tailor-Changed') || '?';
-    var gaps = decodeURIComponent(res.headers.get('X-Tailor-Gaps') || '');
+    var gaps = decodeURIComponent(res.headers.get('X-Tailor-Gaps') || '')
+      .split(',').map(function(s){return s.trim();}).filter(Boolean);
     btn.textContent = '✓ Downloaded';
-    if (gaps) setTimeout(function(){ alert('Tailored '+changed+' lines. Skills the JD wants that are NOT on your CV (not added): '+gaps); }, 300);
+    showGapPanel(changed, gaps);
     setTimeout(function(){ btn.disabled=false; btn.textContent=old; }, 4000);
   } catch (err) {
     alert('Error: '+err.message); btn.disabled=false; btn.textContent=old;

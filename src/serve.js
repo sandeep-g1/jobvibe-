@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
+  ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
   saveResume, resumeMeta, defaultResume, jobByFingerprint,
 } from './db.js';
@@ -95,14 +95,16 @@ function readMultipart(req) {
 }
 
 /** Start the pipeline locally as a detached child, or dispatch the GitHub workflow. */
-async function startRun() {
+async function startRun(uid = null) {
   if (running) return { started: false, message: 'A search is already running.' };
 
   if (RUNNER === 'local') {
     running = true;
-    // Manual "Search jobs now" runs for everyone present regardless of the daily
-    // schedule flag — the whole point of the button is on-demand.
-    const child = spawn(process.execPath, ['--no-warnings', join(ROOT, 'src', 'run.js'), '--all-users'], {
+    // Manual "Search jobs now" matches whoever clicked (or everyone, for the
+    // scheduler) regardless of the daily schedule flag — that is the point of
+    // the button.
+    const args = ['--no-warnings', join(ROOT, 'src', 'run.js'), ...(uid ? ['--user', uid] : ['--all-users'])];
+    const child = spawn(process.execPath, args, {
       cwd: ROOT, detached: true, stdio: 'ignore', env: process.env,
     });
     child.unref();
@@ -123,7 +125,7 @@ async function startRun() {
           'Content-Type': 'application/json',
           'User-Agent': 'jobvibe',
         },
-        body: JSON.stringify({ ref: 'main' }),
+        body: JSON.stringify({ ref: 'main', inputs: { user: uid || '' } }),
       }
     );
     if (res.status === 204) {
@@ -243,12 +245,14 @@ export async function handler(req, res) {
     return send(res, 200, 'text/html; charset=utf-8', loginPage());
   }
   if (path === '/signup' && req.method === 'GET') {
-    return send(res, 200, 'text/html; charset=utf-8', signupPage());
+    return send(res, 200, 'text/html; charset=utf-8',
+      signupPage({ email: url.searchParams.get('email') || '' }));
   }
   if (path === '/login' && req.method === 'POST') {
     const form = await readForm(req);
     const r = await login({ email: form.email, password: form.password });
-    if (!r.ok) return send(res, 401, 'text/html; charset=utf-8', loginPage({ error: r.error, email: form.email }));
+    if (!r.ok) return send(res, 401, 'text/html; charset=utf-8',
+      loginPage({ error: r.error, email: form.email, noAccount: r.noAccount }));
     const { token, expires } = await startSession(r.userId);
     res.writeHead(303, { Location: '/', 'Set-Cookie': sessionCookie(token, expires) });
     return res.end();
@@ -381,9 +385,36 @@ export async function handler(req, res) {
       return res.end(r.buffer);
     }
 
+    if (path === '/api/skills/add' && req.method === 'POST') {
+      const form = await readForm(req);
+      const skill = String(form.skill || '').trim();
+      if (!skill) return send(res, 400, 'application/json', '{"error":"skill required"}');
+      const prev = await profile(uid);
+      const bank = Array.isArray(prev.skillBank) ? prev.skillBank.slice() : [];
+      const exists = bank.some((s) => s.toLowerCase() === skill.toLowerCase());
+      if (!exists) bank.push(skill);
+      const merged = { ...prev, skillBank: bank, userId: uid };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, uid);
+      return send(res, 200, 'application/json',
+        JSON.stringify({ ok: true, added: !exists, skillBank: bank }));
+    }
+
+    if (path === '/api/apply' && req.method === 'POST') {
+      const form = await readForm(req);
+      const fp = String(form.fingerprint || '').trim();
+      if (!fp) return send(res, 400, 'application/json', '{"error":"fingerprint required"}');
+      const out = await markApplied(fp, uid);
+      const p = await profile(uid);
+      return send(res, 200, 'application/json', JSON.stringify({
+        ok: true, applied: out.applied, already: out.already,
+        contact: { name: p.name || '', email: p.email || '', phone: p.phone || '' },
+      }));
+    }
+
     if (path === '/api/run' && req.method === 'POST') {
       const knownRuns = (await allRuns(uid)).length;
-      const out = await startRun();
+      const out = await startRun(uid);
       return send(res, out.started ? 202 : 409, 'application/json',
         JSON.stringify({ ...out, knownRuns, runner: RUNNER }));
     }

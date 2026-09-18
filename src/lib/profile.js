@@ -82,8 +82,8 @@ export const FIELDS = [
   { key: 'baseCity', type: 'text', label: 'Base city' },
   { key: 'jobTitles', type: 'list', label: 'Job titles to search',
     help: 'One per line. Drives what is searched and the title part of the score.' },
-  { key: 'preferredLocations', type: 'list', label: 'Preferred locations',
-    help: 'One per line. Include "remote" to accept remote roles.' },
+  { key: 'preferredLocations', type: 'tags', label: 'Preferred locations',
+    help: 'Type a city and press Enter (or pick a suggestion). Add "remote" to accept remote roles.' },
   { key: 'workModes', type: 'modes', label: 'Work modes you accept' },
   { key: 'sources', type: 'sources', label: 'Job portals to search' },
   { key: 'skillBank', type: 'list', label: 'Your skills',
@@ -119,6 +119,9 @@ export function normaliseProfile(input, previous = {}) {
       if (Number.isFinite(n)) out[f.key] = n;
     } else if (f.type === 'list') {
       out[f.key] = lines(raw);
+    } else if (f.type === 'tags') {
+      // Chip input submits a comma/newline separated value; split on both.
+      out[f.key] = String(raw || '').split(/[\r\n,]+/).map((x) => x.trim()).filter(Boolean);
     } else if (f.type === 'modes' || f.type === 'sources') {
       out[f.key] = Array.isArray(raw) ? raw.filter(Boolean) : lines(raw);
     } else if (f.type === 'toggle') {

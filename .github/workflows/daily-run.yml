@@ -7,7 +7,12 @@ name: Daily job run
 on:
   schedule:
     - cron: '0 9 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      user:
+        description: 'User id to match (blank = all schedule-active users)'
+        required: false
+        default: ''
 
 jobs:
   run:
@@ -45,4 +50,4 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           SITE_URL: https://jobvibe-green.vercel.app
-        run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || '' }}
+        run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || (github.event.inputs.user != '' && format('--user {0}', github.event.inputs.user)) || '--all-users' }}

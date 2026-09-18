@@ -365,6 +365,17 @@ export async function toggleApplied(fingerprint, userId = 'local') {
   return { applied: true };
 }
 
+/** Idempotently mark a job applied (used by the one-click apply flow). */
+export async function markApplied(fingerprint, userId = 'local') {
+  const d = await db();
+  const row = await d.one('SELECT id FROM applications WHERE user_id=? AND fingerprint=?',
+    [userId, fingerprint]);
+  if (row) return { applied: true, already: true };
+  await d.run('INSERT INTO applications (user_id, fingerprint, status, applied_at) VALUES (?,?,?,?)',
+    [userId, fingerprint, 'applied', now()]);
+  return { applied: true, already: false };
+}
+
 export async function appliedSet(userId = 'local') {
   const d = await db();
   const rows = await d.query('SELECT fingerprint FROM applications WHERE user_id=?', [userId]);

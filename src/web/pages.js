@@ -43,6 +43,11 @@ export const SHELL_CSS = `
   .card { background:#fff; border-radius:12px; padding:18px 22px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
   .card h3 { font-size:.74rem; font-weight:700; color:#8a94a6; text-transform:uppercase;
              letter-spacing:.8px; margin-bottom:12px; }
+  .card-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .card-head h3 { margin-bottom:12px; }
+  .edit-link { font-size:.74rem; font-weight:700; color:#0a66c2; text-decoration:none; white-space:nowrap;
+               text-transform:uppercase; letter-spacing:.4px; }
+  .edit-link:hover { text-decoration:underline; }
   .stat-n { font-size:2rem; font-weight:800; color:#0a66c2; line-height:1; letter-spacing:-1px; }
   .stat-l { font-size:.79rem; color:#667085; margin-top:6px; font-weight:500; }
   .stat-sub { font-size:.72rem; color:#a3aab8; margin-top:3px; }
@@ -175,7 +180,8 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
 
   <div class="grid g2">
     <div class="card">
-      <h3>Your skills — the truth boundary</h3>
+      <div class="card-head"><h3>Your skills — the truth boundary</h3>
+        <a class="edit-link" href="/settings#skills">＋ Add / edit</a></div>
       <p class="muted" style="margin-bottom:11px">Resume tailoring may only ever use what is in this list.</p>
       ${profile.skillBank.map((k) => `<span class="chip chip-g">${esc(k)}</span>`).join('')}
     </div>
@@ -189,7 +195,8 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
     </div>
 
     <div class="card">
-      <h3>Search profile</h3>
+      <div class="card-head"><h3>Search profile</h3>
+        <a class="edit-link" href="/settings#profile">✎ Edit</a></div>
       <div class="kv"><span>Base city</span><span>${esc(profile.baseCity)}</span></div>
       <div class="kv"><span>Experience</span><span>${profile.totalExpYears} years</span></div>
       <div class="kv"><span>Preferred locations</span><span>${esc(profile.preferredLocations.join(', '))}</span></div>
@@ -197,7 +204,10 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
       <div class="kv"><span>Minimum score</span><span>${profile.minScore}</span></div>
       <div class="kv"><span>Jobs per report</span><span>${profile.dailyLimit}</span></div>
       <div class="kv"><span>Excluded words</span><span>${esc((profile.excludeKeywords || []).join(', ') || '—')}</span></div>
-      <p class="muted" style="margin-top:12px">Edit <code>profile.json</code> and run again to change any of this.</p>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <a class="btn" href="/settings#profile">Edit search profile</a>
+        <a class="btn btn-ghost" href="/settings">Run a new search</a>
+      </div>
     </div>
 
     <div class="card">
@@ -232,7 +242,8 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
           <a class="btn" href="/reports/${latest.id}">Open report #${latest.id}</a>
           <a class="btn btn-ghost" href="/reports">All reports</a>
         </div>`
-        : '<p class="muted">No report yet. Run <code>npm run run</code>.</p>'}
+        : `<p class="muted" style="margin-bottom:12px">No report yet.</p>
+           <a class="btn" href="/settings">Run your first search</a>`}
     </div>
   </div>
 </div>`;

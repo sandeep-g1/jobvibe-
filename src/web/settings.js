@@ -5,6 +5,16 @@ import { layout, esc } from './pages.js';
 
 const MODES = ['On-site', 'Hybrid', 'Remote'];
 
+// Suggestions for the location chip input (datalist). Not a whitelist — the
+// user can type any city; these just make the common ones one click away.
+const CITY_SUGGEST = [
+  'Remote', 'Bengaluru', 'Mumbai', 'Delhi', 'Gurugram', 'Noida', 'Hyderabad',
+  'Chennai', 'Pune', 'Kolkata', 'Ahmedabad', 'Coimbatore', 'Kochi', 'Thiruvananthapuram',
+  'Chandigarh', 'Jaipur', 'Indore', 'Nagpur', 'Bhubaneswar', 'Visakhapatnam',
+  'Mysuru', 'Mangaluru', 'Vadodara', 'Surat', 'Lucknow', 'Bhopal', 'Nashik',
+  'Gandhinagar', 'Faridabad', 'Ghaziabad', 'Madurai', 'Tiruchirappalli', 'Vijayawada',
+];
+
 // [id, label, keyless]
 const SOURCES = [
   ['greenhouse', 'Greenhouse', true],
@@ -43,6 +53,15 @@ export const FORM_CSS = `
   .kstate.no  { background:#f2f4f8; color:#8a94a6; }
   .saved { background:#dcfce7; color:#166534; border:1px solid #a7e3bf; border-radius:8px;
            padding:9px 14px; font-size:.85rem; font-weight:600; margin-bottom:14px; }
+  .tag-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .tag-chip { display:inline-flex; align-items:center; gap:6px; background:#eef4fc; color:#0a4a8f;
+    border:1px solid #cfe1f7; border-radius:16px; padding:4px 6px 4px 12px; font-size:.83rem; font-weight:600; }
+  .tag-chip button { border:0; background:#d4e4f7; color:#0a4a8f; border-radius:50%; width:18px; height:18px;
+    line-height:1; font-size:.9rem; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; }
+  .tag-chip button:hover { background:#0a66c2; color:#fff; }
+  .tag-add { display:flex; gap:8px; }
+  .tag-add .tag-input { flex:1; }
+  .tag-btn { padding:8px 16px; }
 `;
 
 function renderField(f, profile) {
@@ -71,6 +90,26 @@ function renderField(f, profile) {
     const rows = Math.min(10, Math.max(3, arr.length + 1));
     return `<div class="fld"><label>${esc(f.label)}</label>` +
       `<textarea name="${esc(f.key)}" rows="${rows}">${esc(arr.join('\n'))}</textarea>${help}</div>`;
+  }
+
+  if (f.type === 'tags') {
+    const arr = Array.isArray(val) ? val : [];
+    const listId = `dl_${esc(f.key)}`;
+    const chips = arr.map((c) =>
+      `<span class="tag-chip">${esc(c)}<button type="button" onclick="tagDel(this)" aria-label="Remove">×</button></span>`
+    ).join('');
+    const opts = CITY_SUGGEST.map((c) => `<option value="${esc(c)}">`).join('');
+    return `<div class="fld"><label>${esc(f.label)}</label>
+      <div class="tags" data-key="${esc(f.key)}">
+        <div class="tag-chips">${chips}</div>
+        <div class="tag-add">
+          <input type="text" class="tag-input" list="${listId}" placeholder="Type a city and press Enter…"
+                 onkeydown="tagKey(event,this)" autocomplete="off">
+          <button type="button" class="btn tag-btn" onclick="tagAdd(this)">Add</button>
+        </div>
+        <datalist id="${listId}">${opts}</datalist>
+        <input type="hidden" name="${esc(f.key)}" value="${esc(arr.join(','))}">
+      </div>${help}</div>`;
   }
 
   if (f.type === 'area') {
@@ -169,6 +208,17 @@ export function settingsPage(profile, fields, opts = {}) {
         ${runner === 'none' ? 'disabled' : ''}>Search jobs now</button>
       <span id="runMsg" class="muted"></span>
     </div>
+    <div id="runProgWrap" style="display:none;margin-top:14px">
+      <div style="height:8px;border-radius:6px;background:#e6eaf0;overflow:hidden">
+        <div id="runProgBar" style="height:100%;width:30%;border-radius:6px;
+          background:linear-gradient(90deg,#0a66c2,#00a0dc);
+          animation:runslide 1.4s ease-in-out infinite"></div>
+      </div>
+      <div class="muted" style="margin-top:6px;font-size:.8rem">
+        <span id="runStage">Queuing the search…</span> · <span id="runElapsed">0s</span>
+      </div>
+    </div>
+    <style>@keyframes runslide{0%{margin-left:-32%}50%{margin-left:52%}100%{margin-left:102%}}</style>
     <div class="muted" style="margin-top:10px">${runNote}</div>
     ${lastRun ? `<div class="muted" style="margin-top:8px">Last run: <b>#${lastRun.id}</b> &middot;
       ${esc(new Date(lastRun.started_at).toLocaleString('en-IN'))} &middot; ${lastRun.n_reported} jobs</div>` : ''}
@@ -178,13 +228,13 @@ export function settingsPage(profile, fields, opts = {}) {
 
   <form method="POST" action="/settings">
     <div class="grid g2">
-      <div class="card"><h3>About you</h3>
+      <div class="card" id="profile"><h3>About you</h3>
         ${group(['name', 'totalExpYears', 'baseCity'])}</div>
       <div class="card"><h3>What to search for</h3>
         ${group(['jobTitles', 'preferredLocations', 'workModes'])}</div>
       <div class="card"><h3>Job portals</h3>
         ${group(['sources'])}</div>
-      <div class="card"><h3>Your skills</h3>
+      <div class="card" id="skills"><h3>Your skills</h3>
         ${group(['skillBank'])}</div>
       <div class="card"><h3>Filters</h3>
         ${group(['minScore', 'dailyLimit', 'excludeKeywords', 'excludeCompanies'])}</div>
@@ -203,6 +253,54 @@ export function settingsPage(profile, fields, opts = {}) {
 </div>
 
 <script>
+// ---- location chip input ----
+function tagSync(wrap){
+  var vals = [].map.call(wrap.querySelectorAll('.tag-chip'), function(c){
+    return c.firstChild.textContent.trim();
+  });
+  wrap.querySelector('input[type=hidden]').value = vals.join(',');
+}
+function tagAdd(btn){
+  var wrap = btn.closest('.tags');
+  var input = wrap.querySelector('.tag-input');
+  var raw = (input.value || '').split(',');
+  for (var i=0;i<raw.length;i++){
+    var v = raw[i].trim(); if(!v) continue;
+    var exists = [].some.call(wrap.querySelectorAll('.tag-chip'), function(c){
+      return c.firstChild.textContent.trim().toLowerCase() === v.toLowerCase();
+    });
+    if (exists) continue;
+    var chip = document.createElement('span'); chip.className = 'tag-chip';
+    chip.appendChild(document.createTextNode(v));
+    var x = document.createElement('button'); x.type='button'; x.textContent='×';
+    x.setAttribute('aria-label','Remove'); x.onclick = function(){ tagDel(this); };
+    chip.appendChild(x);
+    wrap.querySelector('.tag-chips').appendChild(chip);
+  }
+  input.value = ''; input.focus(); tagSync(wrap);
+}
+function tagDel(btn){
+  var wrap = btn.closest('.tags'); btn.parentNode.remove(); tagSync(wrap);
+}
+function tagKey(e, input){
+  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); tagAdd(input.parentNode.querySelector('.tag-btn')); }
+}
+var runStart = 0, runTimer = null;
+var STAGES = [
+  [0,   'Queuing the search…'],
+  [20,  'Fetching jobs from every portal…'],
+  [90,  'Scoring jobs against your profile…'],
+  [150, 'Verifying every apply link…'],
+  [210, 'Building your report…'],
+];
+function tickElapsed() {
+  var s = Math.floor((Date.now() - runStart) / 1000);
+  document.getElementById('runElapsed').textContent =
+    s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
+  var stage = STAGES[0][1];
+  for (var i = 0; i < STAGES.length; i++) if (s >= STAGES[i][0]) stage = STAGES[i][1];
+  document.getElementById('runStage').textContent = stage;
+}
 async function runNow() {
   var b = document.getElementById('runBtn'), m = document.getElementById('runMsg');
   b.disabled = true; b.textContent = 'Starting...'; m.textContent = '';
@@ -212,6 +310,9 @@ async function runNow() {
     if (j.started) {
       m.textContent = j.message || 'Search running. This page will open the report when it is ready.';
       b.textContent = 'Searching...';
+      document.getElementById('runProgWrap').style.display = 'block';
+      runStart = Date.now(); tickElapsed();
+      runTimer = setInterval(tickElapsed, 1000);
       poll(j.knownRuns || 0, 0);
     } else {
       m.textContent = j.message || 'Could not start a search.';
@@ -223,7 +324,9 @@ async function runNow() {
   }
 }
 function poll(known, tries) {
-  if (tries > 60) {
+  if (tries > 80) {
+    if (runTimer) clearInterval(runTimer);
+    document.getElementById('runProgWrap').style.display = 'none';
     document.getElementById('runMsg').textContent =
       'Still running. Check the Reports tab in a few minutes.';
     return;
@@ -231,7 +334,11 @@ function poll(known, tries) {
   setTimeout(async function () {
     try {
       var runs = await (await fetch('/api/runs')).json();
-      if (runs.length > known) { location.href = '/reports/' + runs[0].id; return; }
+      if (runs.length > known) {
+        if (runTimer) clearInterval(runTimer);
+        document.getElementById('runStage').textContent = 'Report ready — opening…';
+        location.href = '/reports/' + runs[0].id; return;
+      }
     } catch (e) { /* keep polling */ }
     poll(known, tries + 1);
   }, 15000);

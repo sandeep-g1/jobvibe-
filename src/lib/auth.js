@@ -65,8 +65,12 @@ export async function signup({ email, password, name }) {
 export async function login({ email, password }) {
   email = String(email || '').trim().toLowerCase();
   const user = await userByEmail(email);
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return { ok: false, error: 'Email or password is incorrect.' };
+  if (!user) {
+    return { ok: false, noAccount: true,
+      error: 'No account found for that email or username. Create one to get started.' };
+  }
+  if (!verifyPassword(password, user.password_hash)) {
+    return { ok: false, error: 'Password is incorrect. Please try again.' };
   }
   await touchLogin(user.id);
   return { ok: true, userId: user.id };
