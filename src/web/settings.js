@@ -121,7 +121,7 @@ export function keysCard(secrets) {
 }
 
 export function settingsPage(profile, fields, opts = {}) {
-  const { runner = 'none', lastRun = null, saved = false, secrets = [] } = opts;
+  const { runner = 'none', lastRun = null, saved = false, secrets = [], isAdmin = false } = opts;
   const group = (keys) => fields.filter((f) => keys.includes(f.key))
     .map((f) => renderField(f, profile)).join('');
 
@@ -162,7 +162,7 @@ export function settingsPage(profile, fields, opts = {}) {
       ${esc(new Date(lastRun.started_at).toLocaleString('en-IN'))} &middot; ${lastRun.n_reported} jobs</div>` : ''}
   </div>
 
-  ${secrets.length ? keysCard(secrets) : ''}
+  ${isAdmin && secrets.length ? keysCard(secrets) : ''}
 
   <form method="POST" action="/settings">
     <div class="grid g2">

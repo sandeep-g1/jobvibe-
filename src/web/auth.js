@@ -32,8 +32,8 @@ export function loginPage({ error, email } = {}) {
   return shell('Sign in', `
   ${error ? `<div class="err">${esc(error)}</div>` : ''}
   <form method="POST" action="/login">
-    <label>Email</label>
-    <input type="email" name="email" value="${esc(email || '')}" autocomplete="username" autofocus required>
+    <label>Email or username</label>
+    <input type="text" name="email" value="${esc(email || '')}" autocomplete="username" autofocus required>
     <label>Password</label>
     <input type="password" name="password" autocomplete="current-password" required>
     <button type="submit">Sign in</button>

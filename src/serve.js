@@ -276,7 +276,8 @@ export async function handler(req, res) {
             ? 'Mail is configured. A digest is sent after every search.'
             : 'No mail provider yet — set RESEND_API_KEY and these addresses start receiving reports.',
           saved: url.searchParams.get('saved') === '1',
-          secrets: await secretStatus(),
+          isAdmin: !!user.is_admin,
+          secrets: user.is_admin ? await secretStatus() : [],
         }));
     }
 
@@ -291,6 +292,7 @@ export async function handler(req, res) {
     }
 
     if (path === '/settings/keys' && req.method === 'POST') {
+      if (!user.is_admin) return send(res, 403, 'text/html; charset=utf-8', notFoundPage('Admins only.'));
       const form = await readForm(req);
       let changed = 0;
       for (const m of MANAGED) {
