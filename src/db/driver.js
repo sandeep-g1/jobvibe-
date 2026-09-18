@@ -237,6 +237,19 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS resumes (
+    id          ${pk},
+    user_id     TEXT NOT NULL,
+    filename    TEXT,
+    kind        TEXT,
+    content_b64 TEXT,
+    parsed_json ${json},
+    is_default  INTEGER DEFAULT 1,
+    created_at  TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_resumes_user ON resumes(user_id);
+
   CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
     email         TEXT NOT NULL UNIQUE,

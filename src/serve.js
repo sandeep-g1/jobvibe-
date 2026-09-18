@@ -5,7 +5,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, latestRun, allRuns, runById, matchesForRun,
-  appliedSet, isPostgres, saveProfileRow,
+  appliedSet, isPostgres, saveProfileRow, getProfileRow,
+  saveResume, resumeMeta,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -21,6 +22,10 @@ import {
   sessionCookie, clearCookie,
 } from './lib/auth.js';
 import { loginPage, signupPage } from './web/auth.js';
+import { onboardingPage } from './web/onboarding.js';
+import { extractText } from './lib/resume.js';
+import { parseResume, geminiConfigured } from './lib/gemini.js';
+import Busboy from 'busboy';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
@@ -61,6 +66,30 @@ function readForm(req) {
       }
       resolve(out);
     });
+  });
+}
+
+/** Parse a multipart/form-data body: text fields + a single file (<=6MB). */
+function readMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const fields = {};
+    let file = null;
+    let bb;
+    try { bb = Busboy({ headers: req.headers, limits: { fileSize: 6 * 1024 * 1024, files: 1 } }); }
+    catch (e) { return reject(e); }
+    bb.on('field', (name, val) => { fields[name] = val; });
+    bb.on('file', (name, stream, info) => {
+      const chunks = [];
+      let truncated = false;
+      stream.on('data', (d) => chunks.push(d));
+      stream.on('limit', () => { truncated = true; });
+      stream.on('end', () => {
+        if (info.filename) file = { field: name, filename: info.filename, mime: info.mimeType, buffer: Buffer.concat(chunks), truncated };
+      });
+    });
+    bb.on('close', () => resolve({ fields, file }));
+    bb.on('error', reject);
+    req.pipe(bb);
   });
 }
 
@@ -145,7 +174,17 @@ margin-top:18px;font-family:monospace;word-break:break-all}</style></head>
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+let _ready = false;
+/** Load DB + decrypt secrets into env once per (cold) process. Gemini/Resend
+ *  keys live encrypted in the DB, so the web process must hydrate them too. */
+async function ensureReady() {
+  if (_ready) return;
+  try { await initDB(); await loadSecretsIntoEnv(); } catch { /* handler reports errors */ }
+  _ready = true;
+}
+
 export async function handler(req, res) {
+  await ensureReady();
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -218,7 +257,7 @@ export async function handler(req, res) {
     const r = await signup({ email: form.email, password: form.password, name: form.name });
     if (!r.ok) return send(res, 400, 'text/html; charset=utf-8', signupPage({ error: r.error, email: form.email, name: form.name }));
     const { token, expires } = await startSession(r.userId);
-    res.writeHead(303, { Location: '/settings?welcome=1', 'Set-Cookie': sessionCookie(token, expires) });
+    res.writeHead(303, { Location: '/onboarding', 'Set-Cookie': sessionCookie(token, expires) });
     return res.end();
   }
   if (path === '/logout') {
@@ -276,6 +315,10 @@ export async function handler(req, res) {
             ? 'Mail is configured. A digest is sent after every search.'
             : 'No mail provider yet — set RESEND_API_KEY and these addresses start receiving reports.',
           saved: url.searchParams.get('saved') === '1',
+          welcome: url.searchParams.get('welcome') === '1',
+          autofilled: url.searchParams.get('autofilled') === '1',
+          autofillErr: url.searchParams.get('autofill') === 'err',
+          resume: await resumeMeta(uid),
           isAdmin: !!user.is_admin,
           secrets: user.is_admin ? await secretStatus() : [],
         }));
@@ -311,6 +354,61 @@ export async function handler(req, res) {
       const out = await startRun();
       return send(res, out.started ? 202 : 409, 'application/json',
         JSON.stringify({ ...out, knownRuns, runner: RUNNER }));
+    }
+
+    if (path === '/onboarding' && req.method === 'GET') {
+      const p = await profile(uid);
+      return send(res, 200, 'text/html; charset=utf-8',
+        onboardingPage({ profile: p, resume: await resumeMeta(uid), geminiOn: geminiConfigured() }));
+    }
+
+    if (path === '/onboarding' && req.method === 'POST') {
+      const { fields, file } = await readMultipart(req);
+      const prev = await profile(uid);
+      // basic details the user typed
+      const merged = { ...prev, userId: uid };
+      if (fields.name) merged.name = fields.name.trim();
+      if (fields.baseCity) merged.baseCity = fields.baseCity.trim().toLowerCase();
+      if (fields.totalExpYears !== undefined && fields.totalExpYears !== '') {
+        const n = Number(fields.totalExpYears); if (Number.isFinite(n)) merged.totalExpYears = n;
+      }
+
+      let autofillErr = null;
+      if (file && file.buffer && file.buffer.length) {
+        if (file.truncated) autofillErr = 'That file is over 6 MB — please upload a smaller CV.';
+        else {
+          const ext = await extractText(file.buffer, file.filename, file.mime);
+          if (!ext.ok) autofillErr = ext.error;
+          else {
+            let parsed = null;
+            if (geminiConfigured()) {
+              const pr = await parseResume(ext.text);
+              if (pr.ok) {
+                parsed = pr.data;
+                // Fill fields the user left blank; never overwrite what they typed.
+                if (!merged.name && parsed.name) merged.name = parsed.name;
+                if (!merged.baseCity && parsed.baseCity) merged.baseCity = parsed.baseCity;
+                if (!merged.totalExpYears && parsed.totalExpYears) merged.totalExpYears = parsed.totalExpYears;
+                if (parsed.jobTitles?.length) merged.jobTitles = parsed.jobTitles;
+                if (parsed.skillBank?.length) merged.skillBank = parsed.skillBank;
+                if (parsed.resumeText) merged.resumeText = parsed.resumeText;
+                if (parsed.email && !(merged.emailTo || []).length) merged.emailTo = [parsed.email];
+              } else {
+                autofillErr = `Autofill could not read that CV (${pr.error}). Details saved; you can edit them next.`;
+              }
+            }
+            await saveResume({
+              userId: uid, filename: file.filename, kind: ext.kind,
+              contentB64: file.buffer.toString('base64'), parsed,
+            });
+          }
+        }
+      }
+
+      await saveProfileRow(merged, uid);
+      const q = autofillErr ? `welcome=1&autofill=err` : `welcome=1&autofilled=1`;
+      res.writeHead(303, { Location: `/settings?${q}` });
+      return res.end();
     }
 
     if (path === '/reports') {

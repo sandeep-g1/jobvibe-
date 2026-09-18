@@ -22,9 +22,13 @@
     "node": ">=22"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
+    "mammoth": "^1.12.3",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.16.0"
   },
   "devDependencies": {
+    "docx": "^9.7.1",
     "libsodium-wrappers": "^0.7.15"
   }
 }

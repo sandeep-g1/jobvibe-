@@ -149,6 +149,37 @@ export async function latestIngest() {
   return r ? { ...r, id: num(r.id) } : null;
 }
 
+/* ---------------- resumes ---------------- */
+
+export async function saveResume({ userId, filename, kind, contentB64, parsed }) {
+  const d = await db();
+  // One default resume per user: demote existing, insert the new as default.
+  await d.run('UPDATE resumes SET is_default = 0 WHERE user_id = ?', [userId]);
+  const id = await d.insertReturningId(
+    `INSERT INTO resumes (user_id, filename, kind, content_b64, parsed_json, is_default, created_at)
+     VALUES (?,?,?,?,?,1,?)`,
+    [userId, filename ?? null, kind ?? null, contentB64 ?? null, JSON.stringify(parsed || {}), now()]
+  );
+  return num(id);
+}
+
+export async function defaultResume(userId) {
+  const d = await db();
+  const r = await d.one(
+    'SELECT * FROM resumes WHERE user_id = ? AND is_default = 1 ORDER BY id DESC LIMIT 1', [userId]
+  );
+  return r ? { ...r, id: num(r.id) } : null;
+}
+
+export async function resumeMeta(userId) {
+  const d = await db();
+  const r = await d.one(
+    'SELECT id, filename, kind, created_at FROM resumes WHERE user_id = ? AND is_default = 1 ORDER BY id DESC LIMIT 1',
+    [userId]
+  );
+  return r ? { ...r, id: num(r.id) } : null;
+}
+
 /* ---------------- auth: users & sessions ---------------- */
 
 export async function createUserRow({ id, email, passwordHash, displayName }) {

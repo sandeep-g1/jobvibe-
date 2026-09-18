@@ -121,7 +121,8 @@ export function keysCard(secrets) {
 }
 
 export function settingsPage(profile, fields, opts = {}) {
-  const { runner = 'none', lastRun = null, saved = false, secrets = [], isAdmin = false } = opts;
+  const { runner = 'none', lastRun = null, saved = false, secrets = [], isAdmin = false,
+    welcome = false, autofilled = false, autofillErr = false, resume = null } = opts;
   const group = (keys) => fields.filter((f) => keys.includes(f.key))
     .map((f) => renderField(f, profile)).join('');
 
@@ -145,6 +146,17 @@ export function settingsPage(profile, fields, opts = {}) {
 
 <div class="wrap">
   ${saved ? '<div class="saved">Saved. Your next search will use these settings.</div>' : ''}
+  ${welcome ? '<div class="saved">Welcome! Review the details below — we filled in what we could from your CV. Turn on the daily schedule when you are ready.</div>' : ''}
+  ${autofilled ? '<div class="saved">CV read successfully — your titles, skills and summary are filled in below. Edit anything that is off.</div>' : ''}
+  ${autofillErr ? '<div class="saved" style="background:#fbf0d6;color:#8a5a00;border-color:#e2c88a">Your CV was saved, but autofill could not read it fully. Fill in anything missing below.</div>' : ''}
+
+  <div class="card" style="margin-bottom:16px">
+    <h3>Your CV</h3>
+    <p class="muted">${resume
+      ? `On file: <b>${esc(resume.filename || 'resume')}</b> (${esc(resume.kind || '')}) &middot; uploaded ${esc(new Date(resume.created_at).toLocaleDateString('en-IN'))}`
+      : 'No CV uploaded yet.'}</p>
+    <div style="margin-top:10px"><a class="btn" href="/onboarding">${resume ? 'Upload / replace CV' : 'Upload your CV'}</a></div>
+  </div>
 
   <div class="card" style="margin-bottom:16px">
     <h3>Run a search now</h3>
