@@ -14,7 +14,9 @@ import { getSecretRow, listSecretNames, saveSecretRow, deleteSecretRow } from '.
 /** Secrets that can be supplied through the UI. DATABASE_URL cannot: it is
  *  needed to reach the database in the first place. */
 export const MANAGED = [
-  { key: 'RESEND_API_KEY', label: 'Resend API key',
+  { key: 'GEMINI_API_KEY', label: 'Google Gemini API key',
+    help: 'Powers resume autofill and JD tailoring. Free at aistudio.google.com/apikey.' },
+    { key: 'RESEND_API_KEY', label: 'Resend API key',
     help: 'Sends the daily digest email. resend.com → API Keys.' },
   { key: 'EMAIL_FROM', label: 'Email "from" address', plain: true,
     help: 'Optional. Defaults to Resend’s shared sender.' },
