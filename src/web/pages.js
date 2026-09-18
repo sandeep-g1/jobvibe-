@@ -10,7 +10,7 @@ export const esc = (s) =>
 
 const SOURCE_LABEL = {
   greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby',
-  smartrecruiters: 'SmartRecruiters', himalayas: 'Himalayas', adzuna: 'Adzuna', jooble: 'Jooble',
+  smartrecruiters: 'SmartRecruiters', himalayas: 'Himalayas', cutshort: 'Cutshort', adzuna: 'Adzuna', jooble: 'Jooble',
   careerjet: 'Careerjet', jsearch: 'Google for Jobs',
 };
 

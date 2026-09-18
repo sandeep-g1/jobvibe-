@@ -17,10 +17,11 @@ import * as jooble from './jooble.js';
 import * as careerjet from './careerjet.js';
 import * as jsearch from './jsearch.js';
 import * as himalayas from './himalayas.js';
+import * as cutshort from './cutshort.js';
 
 export const ADAPTERS = {
   greenhouse, lever, ashby, smartrecruiters,
-  adzuna, jooble, careerjet, jsearch, himalayas,
+  adzuna, jooble, careerjet, jsearch, himalayas, cutshort,
 };
 
 export const ADAPTER_IDS = Object.keys(ADAPTERS);

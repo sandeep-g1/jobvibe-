@@ -12,6 +12,7 @@ const SOURCES = [
   ['ashby', 'Ashby', true],
   ['smartrecruiters', 'SmartRecruiters', true],
   ['himalayas', 'Himalayas — remote roles open to India', true],
+  ['cutshort', 'Cutshort — India tech roles (Naukri-class)', true],
   ['jsearch', 'Google for Jobs (JSearch)', false],
   ['adzuna', 'Adzuna', false],
   ['careerjet', 'Careerjet', false],
