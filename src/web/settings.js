@@ -179,7 +179,7 @@ export function settingsPage(profile, fields, opts = {}) {
       <div class="card"><h3>Resume summary</h3>
         ${group(['resumeText'])}</div>
       <div class="card"><h3>Email delivery</h3>
-        ${group(['emailEnabled', 'emailTo', 'emailCc'])}
+        ${group(['scheduleActive', 'emailEnabled', 'emailTo', 'emailCc'])}
         <p class="muted" style="margin-top:4px">${esc(opts.emailNote || '')}</p></div>
     </div>
     <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">

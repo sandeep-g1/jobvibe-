@@ -95,6 +95,8 @@ export const FIELDS = [
   { key: 'excludeKeywords', type: 'list', label: 'Exclude titles containing',
     help: 'One per line. Matched against the job title only.' },
   { key: 'excludeCompanies', type: 'list', label: 'Exclude these companies' },
+  { key: 'scheduleActive', type: 'toggle', label: 'Run my search automatically every day',
+    help: 'Off by default. When on, the daily 08:00 IST run scores new jobs for you and emails your report.' },
   { key: 'emailEnabled', type: 'toggle', label: 'Email me the daily report' },
   { key: 'emailTo', type: 'list', label: 'Send report to',
     help: 'One address per line. These are the main recipients.' },

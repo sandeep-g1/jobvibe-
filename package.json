@@ -14,7 +14,9 @@
     "expand": "node --no-warnings src/tools/expand-registry.js",
     "secrets:push": "node --no-warnings src/tools/push-secrets.js",
     "email:test": "node --no-warnings src/tools/email-test.js",
-    "gh:token": "node --no-warnings src/tools/push-gh-token.js"
+    "gh:token": "node --no-warnings src/tools/push-gh-token.js",
+    "ingest": "node --no-warnings src/ingest-cli.js",
+    "match": "node --no-warnings src/match-cli.js"
   },
   "engines": {
     "node": ">=22"

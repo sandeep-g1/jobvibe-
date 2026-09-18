@@ -122,6 +122,71 @@ export async function latestRun() {
   return r ? { ...r, id: num(r.id) } : null;
 }
 
+/* ---------------- ingest runs ---------------- */
+
+export async function startIngest() {
+  const d = await db();
+  return num(await d.insertReturningId('INSERT INTO ingest_runs (started_at) VALUES (?)', [now()]));
+}
+
+export async function finishIngest(id, s) {
+  const d = await db();
+  await d.run(
+    `UPDATE ingest_runs SET finished_at=?, per_source=?, n_fetched=?, n_after_india=?,
+       n_new=?, pool_size=?, errors=? WHERE id=?`,
+    [now(), JSON.stringify(s.perSource || {}), s.fetched | 0, s.afterIndia | 0,
+     s.newJobs | 0, s.poolSize | 0, JSON.stringify(s.errors || []), id]
+  );
+}
+
+export async function latestIngest() {
+  const d = await db();
+  const r = await d.one('SELECT * FROM ingest_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1');
+  return r ? { ...r, id: num(r.id) } : null;
+}
+
+/* ---------------- profiles: multi-user ---------------- */
+
+/** All stored profiles, parsed. Each: { userId, data, updatedAt }. */
+export async function allProfiles() {
+  const d = await db();
+  const rows = await d.query('SELECT user_id, data, updated_at FROM profiles');
+  const out = [];
+  for (const r of rows) {
+    try { out.push({ userId: r.user_id, data: JSON.parse(r.data), updatedAt: r.updated_at }); }
+    catch { /* skip corrupt */ }
+  }
+  return out;
+}
+
+/** Users whose daily schedule is on. scheduleActive defaults to false. */
+export async function activeProfiles() {
+  return (await allProfiles()).filter((p) => p.data && p.data.scheduleActive === true);
+}
+
+/**
+ * Candidate jobs for one user: in the shared pool, link not known-dead, seen
+ * recently, and not already shown to this user. This is the per-user match input.
+ */
+export async function candidateJobsForUser(userId, { days = 10, limit = 1500 } = {}) {
+  const d = await db();
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  return d.query(
+    `SELECT j.id, j.fingerprint, j.source, j.source_job_id, j.title, j.company, j.city,
+            j.work_mode, j.employment_type, j.min_exp, j.max_exp, j.salary_raw, j.jd_text,
+            j.skills_required, j.skills_nice, j.apply_url, j.final_url, j.link_status,
+            j.posted_at, j.alt_links
+       FROM jobs j
+       LEFT JOIN job_matches m ON m.job_id = j.id AND m.user_id = ?
+      WHERE m.id IS NULL
+        AND j.link_status != 'DEAD'
+        AND j.last_seen_at > ?
+      ORDER BY j.first_seen_at DESC
+      LIMIT ?`,
+    [userId, since, limit]
+  );
+}
+
 /* ---------------- jobs ---------------- */
 
 /** Returns { id, isNew }. Existing rows get last_seen_at refreshed and links merged. */

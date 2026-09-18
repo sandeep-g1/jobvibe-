@@ -229,6 +229,18 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  CREATE TABLE IF NOT EXISTS ingest_runs (
+    id            ${pk},
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    per_source    ${json},
+    n_fetched     INTEGER DEFAULT 0,
+    n_after_india INTEGER DEFAULT 0,
+    n_new         INTEGER DEFAULT 0,
+    pool_size     INTEGER DEFAULT 0,
+    errors        ${json}
+  );
+
   CREATE TABLE IF NOT EXISTS secrets (
     id         ${pk},
     name       TEXT NOT NULL UNIQUE,

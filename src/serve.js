@@ -65,7 +65,9 @@ async function startRun() {
 
   if (RUNNER === 'local') {
     running = true;
-    const child = spawn(process.execPath, ['--no-warnings', join(ROOT, 'src', 'run.js')], {
+    // Manual "Search jobs now" runs for everyone present regardless of the daily
+    // schedule flag — the whole point of the button is on-demand.
+    const child = spawn(process.execPath, ['--no-warnings', join(ROOT, 'src', 'run.js'), '--all-users'], {
       cwd: ROOT, detached: true, stdio: 'ignore', env: process.env,
     });
     child.unref();
