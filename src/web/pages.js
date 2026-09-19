@@ -57,6 +57,14 @@ export const SHELL_CSS = `
   .chip-g { background:#dcfce7; color:#166534; border-color:#a7e3bf; }
   .chip-r { background:#fee2e2; color:#991b1b; border-color:#f0b6b8; }
   .chip-n { background:#f2f4f8; color:#5a6478; border-color:#dfe4ec; }
+  .chip-act { display:inline-flex; align-items:center; gap:6px; padding-right:5px; }
+  .chip-x, .chip-plus { border:0; border-radius:50%; width:18px; height:18px; line-height:1; font-size:.9rem;
+    font-weight:700; cursor:pointer; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+  .chip-x { background:#f7c9c9; color:#991b1b; }
+  .chip-x:hover { background:#dc2626; color:#fff; }
+  .chip-plus { background:#c6e6d0; color:#166534; }
+  .chip-plus:hover { background:#16a34a; color:#fff; }
+  .chip-x:disabled, .chip-plus:disabled { opacity:.5; cursor:default; }
 
   .kv { display:flex; justify-content:space-between; gap:14px; padding:7px 0;
         border-bottom:1px solid #f0f2f5; font-size:.85rem; }
@@ -182,16 +190,20 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
     <div class="card">
       <div class="card-head"><h3>Your skills — the truth boundary</h3>
         <a class="edit-link" href="/settings#skills">＋ Add / edit</a></div>
-      <p class="muted" style="margin-bottom:11px">Resume tailoring may only ever use what is in this list.</p>
-      ${profile.skillBank.map((k) => `<span class="chip chip-g">${esc(k)}</span>`).join('')}
+      <p class="muted" style="margin-bottom:11px">Resume tailoring may only ever use what is in this list. Click − to remove one.</p>
+      <div id="skillBank">
+        ${profile.skillBank.map((k) => skillChip(k)).join('')}
+      </div>
     </div>
 
     <div class="card">
       <h3>Skills employers want that you don't list</h3>
-      <p class="muted" style="margin-bottom:11px">Ranked by how many of your matched jobs asked for them. Answering these is the Phase&nbsp;5 gap review.</p>
+      <p class="muted" style="margin-bottom:11px">Ranked by how many of your matched jobs asked for them. If you genuinely have one, click ＋ to add it to your skills.</p>
+      <div id="gapList">
       ${topGaps.length
-        ? topGaps.map(([k, n]) => `<span class="chip chip-r">${esc(k)} · ${n}</span>`).join('')
+        ? topGaps.map(([k, n]) => gapChip(k, n)).join('')
         : '<p class="muted">No gaps yet — run a report first.</p>'}
+      </div>
     </div>
 
     <div class="card">
@@ -246,10 +258,54 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
            <a class="btn" href="/settings">Run your first search</a>`}
     </div>
   </div>
-</div>`;
+</div>
+${DASH_SCRIPT}`;
 
   return layout({ title: `${esc(profile.name)} — Dashboard`, active: 'dash', body, navExtra: userChip(user) });
 }
+
+/** A skill in the bank, with a remove (−) button. */
+function skillChip(k) {
+  return `<span class="chip chip-g chip-act" data-skill="${esc(k)}">${esc(k)}` +
+    `<button type="button" class="chip-x" title="Remove" onclick="delSkill(this)">−</button></span>`;
+}
+/** A missing/demanded skill, with an add (＋) button. */
+function gapChip(k, n) {
+  return `<span class="chip chip-r chip-act" data-skill="${esc(k)}">${esc(k)} · ${n}` +
+    `<button type="button" class="chip-plus" title="Add to my skills" onclick="addGap(this)">＋</button></span>`;
+}
+
+const DASH_SCRIPT = `<script>
+function chipEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+async function delSkill(btn){
+  var chip = btn.closest('.chip'); var skill = chip.getAttribute('data-skill');
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/skills/remove',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'skill='+encodeURIComponent(skill)});
+    var j = await r.json();
+    if (j.ok) { chip.style.transition='opacity .2s'; chip.style.opacity='0'; setTimeout(function(){chip.remove();},200); }
+    else btn.disabled=false;
+  } catch(e){ btn.disabled=false; }
+}
+async function addGap(btn){
+  var chip = btn.closest('.chip'); var skill = chip.getAttribute('data-skill');
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/skills/add',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'skill='+encodeURIComponent(skill)});
+    var j = await r.json();
+    if (j.ok) {
+      var bank = document.getElementById('skillBank');
+      if (bank && j.added) {
+        var s = document.createElement('span');
+        s.className='chip chip-g chip-act'; s.setAttribute('data-skill', skill);
+        s.innerHTML = chipEsc(skill)+'<button type="button" class="chip-x" title="Remove" onclick="delSkill(this)">−</button>';
+        bank.appendChild(s);
+      }
+      chip.style.transition='opacity .2s'; chip.style.opacity='0'; setTimeout(function(){chip.remove();},200);
+    } else btn.disabled=false;
+  } catch(e){ btn.disabled=false; }
+}
+</script>`;
 
 /* ------------------------------------------------------------------ */
 /*  Reports index                                                      */

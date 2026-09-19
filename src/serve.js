@@ -400,6 +400,19 @@ export async function handler(req, res) {
         JSON.stringify({ ok: true, added: !exists, skillBank: bank }));
     }
 
+    if (path === '/api/skills/remove' && req.method === 'POST') {
+      const form = await readForm(req);
+      const skill = String(form.skill || '').trim();
+      if (!skill) return send(res, 400, 'application/json', '{"error":"skill required"}');
+      const prev = await profile(uid);
+      const bank = (Array.isArray(prev.skillBank) ? prev.skillBank : [])
+        .filter((s) => s.toLowerCase() !== skill.toLowerCase());
+      const merged = { ...prev, skillBank: bank, userId: uid };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, uid);
+      return send(res, 200, 'application/json', JSON.stringify({ ok: true, skillBank: bank }));
+    }
+
     if (path === '/api/apply' && req.method === 'POST') {
       const form = await readForm(req);
       const fp = String(form.fingerprint || '').trim();
