@@ -28,6 +28,7 @@ import { loginPage, signupPage } from './web/auth.js';
 import { onboardingPage, reviewPage } from './web/onboarding.js';
 import { answersPage, answersFromForm } from './web/answers.js';
 import { getAnswers } from './lib/answers.js';
+import { telegramConfigured, webhookSecret, handleUpdate, botUsername, newLinkCode, activate } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
 import { parseResume, geminiConfigured } from './lib/gemini.js';
 import Busboy from 'busboy';
@@ -237,6 +238,20 @@ export async function handler(req, res) {
     return send(res, out.ok ? 200 : 503, 'application/json', JSON.stringify(out, null, 2));
   }
 
+  // Telegram calls this for every message and button tap. Public, but only
+  // genuine Telegram calls carry our secret header.
+  if (path === '/api/telegram/webhook' && req.method === 'POST') {
+    if (!telegramConfigured() || req.headers['x-telegram-bot-api-secret-token'] !== webhookSecret()) {
+      return send(res, 401, 'application/json', '{"error":"unauthorised"}');
+    }
+    let raw = '';
+    for await (const chunk of req) { raw += chunk; if (raw.length > 1e6) break; }
+    let update = null;
+    try { update = JSON.parse(raw); } catch { /* ignore junk */ }
+    if (update) await handleUpdate(update);
+    return send(res, 200, 'application/json', '{"ok":true}');
+  }
+
   // Vercel Cron hits this. GitHub's own scheduler is best-effort and has been
   // running ~4.7 hours late, so the punctual trigger lives here and dispatches
   // the workflow, which is where the five-minute run can actually execute.
@@ -368,6 +383,38 @@ export async function handler(req, res) {
       return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p), uid, user));
     }
 
+    // Telegram: link this account (one-time code, 30 min) and open the bot.
+    if (path === '/telegram/connect') {
+      if (!telegramConfigured()) {
+        return send(res, 503, 'text/html; charset=utf-8', notFoundPage('Telegram alerts are not set up yet. An admin needs to add the bot token.'));
+      }
+      const bot = await botUsername();
+      if (!bot) return send(res, 502, 'text/html; charset=utf-8', notFoundPage('Could not reach the Telegram bot. Try again shortly.'));
+      const prev = await profile(uid);
+      const link = newLinkCode();
+      const merged = { ...prev, telegramLink: link, userId: uid };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, uid);
+      res.writeHead(303, { Location: `https://t.me/${bot}?start=${link.code}` });
+      return res.end();
+    }
+    if (path === '/telegram/disconnect' && req.method === 'POST') {
+      const prev = await profile(uid);
+      const { telegram, telegramLink, ...rest } = prev; // eslint-disable-line no-unused-vars
+      delete rest._source; delete rest._updatedAt;
+      await saveProfileRow({ ...rest, userId: uid }, uid);
+      res.writeHead(303, { Location: '/' });
+      return res.end();
+    }
+    if (path === '/settings/telegram/activate' && req.method === 'POST') {
+      if (!user.is_admin) return send(res, 403, 'text/html; charset=utf-8', notFoundPage('Admins only.'));
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const proto = req.headers['x-forwarded-proto'] || (String(host).startsWith('localhost') ? 'http' : 'https');
+      const out = await activate(`${proto}://${host}`);
+      res.writeHead(303, { Location: `/settings?tg=${out.ok ? `ok&bot=${encodeURIComponent(out.username || '')}` : `err&msg=${encodeURIComponent(out.error || 'failed')}`}` });
+      return res.end();
+    }
+
     if (path === '/answers' && req.method === 'GET') {
       return send(res, 200, 'text/html; charset=utf-8',
         answersPage(await profile(uid), { saved: url.searchParams.get('saved') === '1' }));
@@ -398,6 +445,7 @@ export async function handler(req, res) {
           resume: await resumeMeta(uid),
           isAdmin: !!user.is_admin,
           secrets: user.is_admin ? await secretStatus() : [],
+          tg: url.searchParams.get('tg') ? { result: url.searchParams.get('tg'), bot: url.searchParams.get('bot') || '', msg: url.searchParams.get('msg') || '' } : null,
         }));
     }
 

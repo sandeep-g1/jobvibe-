@@ -3,6 +3,7 @@
 import { dashboardStats, allRuns, resumeMeta } from '../db.js';
 import { missingProfile } from '../lib/profile.js';
 import { answerBankStatus } from '../lib/answers.js';
+import { telegramConfigured } from '../lib/telegram.js';
 import { FORM_CSS } from './settings.js';
 
 export const esc = (s) =>
@@ -191,6 +192,15 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
     <p style="font-size:.88rem;color:#475467;margin-bottom:12px">Needed before the agent can apply for you: <b>${esc(bank.missing.slice(0, 4).join(', '))}${bank.missing.length > 4 ? ' and more' : ''}</b>.</p>
     <a class="btn" href="/answers">Fill in application answers</a>
   </div>` : ''}
+  ${telegramConfigured() ? (profile.telegram?.chatId ? `
+  <div class="card" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:.9rem">📲 <b>Telegram connected</b>${profile.telegram.username ? ` (@${esc(profile.telegram.username)})` : ''}: your daily matches arrive there with one-tap Approve.</span>
+    <form method="POST" action="/telegram/disconnect" style="margin-left:auto"><button class="btn btn-ghost" type="submit">Disconnect</button></form>
+  </div>` : `
+  <div class="card" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-left:4px solid #229ed9">
+    <span style="font-size:.9rem">📲 <b>Get your matches on Telegram</b>: approve or skip each job with one tap, and answer the agent's questions from your phone.</span>
+    <a class="btn" href="/telegram/connect" target="_blank" rel="noopener" style="margin-left:auto;background:#229ed9">Connect Telegram</a>
+  </div>`) : ''}
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card"><div class="stat-n">${s.runs}</div><div class="stat-l">Reports generated</div>
       <div class="stat-sub">${latest ? new Date(latest.started_at).toLocaleDateString('en-IN') : 'none yet'}</div></div>

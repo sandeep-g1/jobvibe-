@@ -7,7 +7,7 @@
 import { ADAPTERS } from './adapters/index.js';
 import {
   candidateJobsForUser, insertMatch, matchesForRun, appliedSet,
-  startRun, finishRun, latestIngest, defaultResume,
+  startRun, finishRun, latestIngest, defaultResume, topMatchesForRun,
 } from './db.js';
 import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score.js';
 import { verifyJobs, STATUS } from './verify.js';
@@ -16,6 +16,7 @@ import { sendDigest } from './email.js';
 import { loadProfileAsync, missingProfile } from './lib/profile.js';
 import { userScope, inScope } from './lib/geo.js';
 import { aiRerank } from './lib/rerank.js';
+import { telegramConfigured, sendDigest as sendTelegram } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
 
 const log = (m) => console.log(`  match · ${m}`);
@@ -142,6 +143,12 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   const siteUrl = (process.env.SITE_URL || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
   let digest = { sent: false, reason: 'email disabled for this run' };
   if (email) digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
+
+  // Telegram: top matches with one-tap Approve / Skip.
+  if (email && profile.telegram?.chatId && telegramConfigured()) {
+    const tgOut = await sendTelegram(profile.telegram.chatId, await topMatchesForRun(runId, 5), { total: picked.length, runId });
+    log(`${userId}: telegram ${tgOut.sent} sent${tgOut.error ? ` (${tgOut.error})` : ''}`);
+  }
 
   await finishRun(runId, {
     perSource,

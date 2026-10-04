@@ -330,6 +330,9 @@ const MIGRATIONS = [
   "ALTER TABLE runs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'",
   // Multi-country: ISO code of the job's country. Rows from before are India.
   "ALTER TABLE jobs ADD COLUMN country TEXT NOT NULL DEFAULT 'IN'",
+  // Approve/skip from Telegram (or the report): what the apply agent acts on.
+  'ALTER TABLE job_matches ADD COLUMN decision TEXT',
+  'ALTER TABLE job_matches ADD COLUMN decided_at TEXT',
 ];
 
 /* ------------------------------------------------------------------ */

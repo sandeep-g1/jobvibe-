@@ -16,6 +16,8 @@ import { getSecretRow, listSecretNames, saveSecretRow, deleteSecretRow } from '.
 export const MANAGED = [
   { key: 'GEMINI_API_KEY', label: 'Google Gemini API key',
     help: 'Powers resume autofill and JD tailoring. Free at aistudio.google.com/apikey.' },
+  { key: 'TELEGRAM_BOT_TOKEN', label: 'Telegram bot token',
+    help: 'From @BotFather in Telegram (/newbot). After saving, click "Activate Telegram bot" below.' },
     { key: 'RESEND_API_KEY', label: 'Resend API key',
     help: 'Sends the daily digest email. resend.com → API Keys.' },
   { key: 'EMAIL_FROM', label: 'Email "from" address', plain: true,

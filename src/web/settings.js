@@ -197,12 +197,19 @@ export function keysCard(secrets) {
         <code>DATABASE_URL</code> cannot live here — it is needed to reach this database.
       </p>
     </div>
-  </form>`;
+  </form>
+  ${secrets.some((k) => k.key === 'TELEGRAM_BOT_TOKEN' && k.set) ? `
+  <form method="POST" action="/settings/telegram/activate" class="card" style="margin-bottom:16px">
+    <h3>Telegram bot</h3>
+    <p class="muted" style="margin-bottom:12px">Points Telegram at this site so the bot can receive messages and button taps.
+      Click once after saving the token, and again if you change the token or the site address.</p>
+    <button class="btn" type="submit">Activate Telegram bot</button>
+  </form>` : ''}`;
 }
 
 export function settingsPage(profile, fields, opts = {}) {
   const { runner = 'none', lastRun = null, saved = false, secrets = [], isAdmin = false,
-    welcome = false, autofilled = false, autofillErr = false, resume = null } = opts;
+    welcome = false, autofilled = false, autofillErr = false, resume = null, tg = null } = opts;
   const group = (keys) => fields.filter((f) => keys.includes(f.key))
     .map((f) => renderField(f, profile)).join('');
 
@@ -265,6 +272,9 @@ export function settingsPage(profile, fields, opts = {}) {
       ${esc(new Date(lastRun.started_at).toLocaleString('en-IN'))} &middot; ${lastRun.n_reported} jobs</div>` : ''}
   </div>
 
+  ${tg ? (tg.result === 'ok'
+    ? `<div class="saved">Telegram bot @${esc(tg.bot)} is active. Users can now tap “Connect Telegram” on their dashboard.</div>`
+    : `<div class="saved" style="background:#fee2e2;color:#991b1b;border-color:#f0b6b8">Telegram activation failed: ${esc(tg.msg)}</div>`) : ''}
   ${isAdmin && secrets.length ? keysCard(secrets) : ''}
 
   <form method="POST" action="/settings">

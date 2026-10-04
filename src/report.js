@@ -59,6 +59,7 @@ export function buildRows(matches, applied = new Set()) {
     competitionReason: m.competition_reason || '',
     applicants: m.applicants,
     applied: applied.has(m.fingerprint),
+    decision: m.decision || null,
     isNew: true,
   }));
 }
@@ -130,6 +131,8 @@ function html(rows, { profile, runId, errors, perSource, date }) {
 
   .job-num { font-weight:700; color:#888; font-size:.8rem; }
   .job-title { font-weight:600; color:#1a1a2e; display:block; }
+  .dec { font-size:.68rem; font-weight:700; padding:1px 7px; border-radius:8px; vertical-align:middle; white-space:nowrap; }
+  .dec-ok { background:#dcfce7; color:#15803d; } .dec-no { background:#f2f4f8; color:#8a94a6; }
   .job-sub { font-size:.75rem; color:#8a94a6; margin-top:3px; }
   .company-name { color:#0a66c2; font-weight:500; }
 
@@ -324,7 +327,8 @@ function render(){
     if (isApplied) tr.className = 'row-applied';
     tr.innerHTML =
       '<td class="job-num">'+j.n+'</td>'+
-      '<td><span class="job-title">'+esc(j.title)+'</span>'+
+      '<td><span class="job-title">'+esc(j.title)+
+        (j.decision==='approved' ? ' <span class="dec dec-ok">✓ Approved</span>' : j.decision==='skipped' ? ' <span class="dec dec-no">Skipped</span>' : '')+'</span>'+
         '<span class="job-sub">'+esc(j.city)+' · <span class="src-badge">'+esc(j.sourceLabel)+'</span>'+
         (j.linkStatus==='UNVERIFIED'?'<span class="link-warn">unverified</span>':'')+'</span>'+
         (isApplied?' <span class="applied-tag">✓ Applied</span>':'')+'</td>'+

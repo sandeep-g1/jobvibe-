@@ -355,6 +355,38 @@ export async function matchesForRun(runId) {
   );
 }
 
+/** One match with its job, for notifications and button handling. */
+export async function matchWithJob(matchId) {
+  const d = await db();
+  return d.one(
+    `SELECT m.id, m.user_id, m.fingerprint, m.score, m.why_text, m.recommendation, m.decision,
+            j.title, j.company, j.city, j.country, j.work_mode, j.apply_url, j.final_url, j.salary_raw
+       FROM job_matches m JOIN jobs j ON j.id = m.job_id WHERE m.id = ?`,
+    [matchId]
+  );
+}
+
+/** Record approve/skip. Scoped to the owner, so one user can never decide another's match. */
+export async function setDecision(matchId, userId, decision) {
+  const d = await db();
+  const row = await d.one('SELECT id, decision FROM job_matches WHERE id = ? AND user_id = ?', [matchId, userId]);
+  if (!row) return null;
+  await d.run('UPDATE job_matches SET decision = ?, decided_at = ? WHERE id = ?', [decision, now(), row.id]);
+  return { id: num(row.id), previous: row.decision || null };
+}
+
+/** Top matches of one run, best first, with their ids (for the Telegram digest). */
+export async function topMatchesForRun(runId, limit = 5) {
+  const d = await db();
+  return d.query(
+    `SELECT m.id, m.score, m.why_text, m.recommendation, j.title, j.company, j.city, j.work_mode, j.salary_raw,
+            j.apply_url, j.final_url
+       FROM job_matches m JOIN jobs j ON j.id = m.job_id
+      WHERE m.run_id = ? AND m.decision IS NULL ORDER BY m.score DESC LIMIT ?`,
+    [runId, limit]
+  );
+}
+
 /* ---------------- applications ---------------- */
 
 export async function toggleApplied(fingerprint, userId = 'local') {
