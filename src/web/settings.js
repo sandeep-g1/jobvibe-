@@ -243,7 +243,7 @@ export function settingsPage(profile, fields, opts = {}) {
       <div class="card"><h3>Job portals</h3>
         ${group(['sources'])}</div>
       <div class="card" id="skills"><h3>Your skills</h3>
-        ${group(['skillBank'])}</div>
+        ${group(['skillBank', 'stretchSkills'])}</div>
       <div class="card"><h3>Filters</h3>
         ${group(['minScore', 'dailyLimit', 'excludeKeywords', 'excludeCompanies'])}</div>
       <div class="card"><h3>Resume summary</h3>

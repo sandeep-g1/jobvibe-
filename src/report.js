@@ -168,6 +168,12 @@ function html(rows, { profile, runId, errors, perSource, date }) {
   .gap-head button { border:0; background:transparent; font-size:1.2rem; line-height:1; cursor:pointer; color:#8a94a6; }
   .gap-body { padding:14px 16px; }
   .gap-body p { font-size:.82rem; color:#475467; margin-bottom:10px; line-height:1.5; }
+  .gap-ats { font-size:.86rem; color:#1a1a2e; background:#f0f7ff; border:1px solid #cfe1f7; border-radius:8px;
+    padding:8px 12px; margin-bottom:12px; }
+  .gap-ats .up { color:#15803d; }
+  .gap-added { font-size:.8rem; color:#1a1a2e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px;
+    padding:9px 12px; margin-bottom:12px; }
+  .gap-added ul { margin:6px 0 0 18px; } .gap-added li { margin:2px 0; } .gap-added span { color:#8a94a6; }
   .gap-chips { display:flex; flex-wrap:wrap; gap:8px; }
   .gap-chip { display:inline-flex; align-items:center; gap:7px; background:#fff7ed; color:#9a3412;
     border:1px solid #fed7aa; border-radius:18px; padding:5px 12px; font-size:.8rem; font-weight:600; cursor:pointer; }
@@ -363,7 +369,7 @@ async function applyJob(fp){
 }
 
 // ---- skill-gap review: add a JD skill you actually have to your skill bank ----
-function showGapPanel(changed, gaps){
+function showGapPanel(changed, gaps, ats, added){
   var old = document.getElementById('gapPanel'); if (old) old.remove();
   var p = document.createElement('div'); p.id = 'gapPanel'; p.className = 'gap-panel';
   var head = document.createElement('div'); head.className = 'gap-head';
@@ -371,6 +377,18 @@ function showGapPanel(changed, gaps){
     '<button onclick="document.getElementById(\\'gapPanel\\').remove()" aria-label="Close">×</button>';
   p.appendChild(head);
   var body = document.createElement('div'); body.className = 'gap-body';
+  if (ats && ats[0] !== '' && ats[1] !== undefined && ats[1] !== '') {
+    var a = document.createElement('div'); a.className = 'gap-ats';
+    a.innerHTML = 'ATS keyword match <b>'+esc(ats[0])+'%</b> → <b class="up">'+esc(ats[1])+'%</b>';
+    body.appendChild(a);
+  }
+  if (added && added.length) {
+    var ad = document.createElement('div'); ad.className = 'gap-added';
+    ad.innerHTML = '<b>Added from close experience. Prepare these before the interview:</b><ul>'+
+      added.map(function(x){ var q = x.split(' <- '); return '<li>'+esc(q[0])+(q[1] ? ' <span>(from your '+esc(q[1])+')</span>' : '')+'</li>'; }).join('')+
+      '</ul>';
+    body.appendChild(ad);
+  }
   if (!gaps.length) {
     body.innerHTML = '<p>Every skill this job asked for is already on your CV. 🎉</p>';
   } else {
@@ -432,9 +450,12 @@ async function tailorCV(btn, fp){
     document.body.appendChild(a); a.click(); a.remove();
     var changed = res.headers.get('X-Tailor-Changed') || '?';
     var gaps = decodeURIComponent(res.headers.get('X-Tailor-Gaps') || '')
-      .split(',').map(function(s){return s.trim();}).filter(Boolean);
+      .split(' | ').map(function(s){return s.trim();}).filter(Boolean);
+    var ats = (res.headers.get('X-Tailor-Ats') || '').split(',');
+    var added = decodeURIComponent(res.headers.get('X-Tailor-Added') || '')
+      .split('; ').filter(Boolean);
     btn.textContent = '✓ Downloaded';
-    showGapPanel(changed, gaps);
+    showGapPanel(changed, gaps, ats, added);
     setTimeout(function(){ btn.disabled=false; btn.textContent=old; }, 4000);
   } catch (err) {
     alert('Error: '+err.message); btn.disabled=false; btn.textContent=old;

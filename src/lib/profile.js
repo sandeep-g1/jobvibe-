@@ -88,6 +88,8 @@ export const FIELDS = [
   { key: 'sources', type: 'sources', label: 'Job portals to search' },
   { key: 'skillBank', type: 'list', label: 'Your skills',
     help: 'One per line. Resume tailoring may only ever use skills listed here.' },
+  { key: 'stretchSkills', type: 'toggle', label: 'Let CV tailoring add close-equivalent skills',
+    help: 'E.g. adds AWS for an AWS job when your CV shows Azure. Never adds employers, titles, degrees, certifications or numbers. Every added skill is listed for you to prepare before interviews.' },
   { key: 'resumeText', type: 'area', label: 'Resume summary',
     help: 'Plain text. Feeds the semantic match score — richer and more honest scores better.' },
   { key: 'minScore', type: 'number', label: 'Minimum match score' },

@@ -418,7 +418,10 @@ export async function handler(req, res) {
           JSON.stringify({ error: 'Tailoring needs a .docx CV. Re-upload as .docx to enable it.' }));
       }
       const p = await profile(uid);
-      const r = await tailorResume(Buffer.from(resume.content_b64, 'base64'), j, p.skillBank || []);
+      const r = await tailorResume(Buffer.from(resume.content_b64, 'base64'), j, p.skillBank || [], {
+        stretch: p.stretchSkills !== false, // on unless the user turned it off
+        yearsExp: p.totalExpYears ?? null,
+      });
       if (!r.ok) return send(res, 502, 'application/json', JSON.stringify({ error: r.error }));
 
       const safe = (s2) => String(s2 || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
@@ -427,7 +430,10 @@ export async function handler(req, res) {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'Content-Disposition': `attachment; filename="${fname}"`,
         'X-Tailor-Changed': String(r.changed),
-        'X-Tailor-Gaps': encodeURIComponent((r.gaps || []).join(', ')),
+        'X-Tailor-Gaps': encodeURIComponent((r.gaps || []).join(' | ')),
+        'X-Tailor-Ats': `${r.ats?.before ?? ''},${r.ats?.after ?? ''}`,
+        'X-Tailor-Added': encodeURIComponent((r.added || []).map((a) => `${a.skill} <- ${a.basedOn}`).join('; ')),
+        'Access-Control-Expose-Headers': 'Content-Disposition, X-Tailor-Changed, X-Tailor-Gaps, X-Tailor-Ats, X-Tailor-Added',
         'Cache-Control': 'no-store',
       });
       return res.end(r.buffer);

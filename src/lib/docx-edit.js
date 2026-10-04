@@ -22,23 +22,53 @@ function xmlUnescape(s) {
     .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 }
 
-/** Plain text of one paragraph chunk (all <w:t> concatenated). */
+/** Plain text of one paragraph chunk (all <w:t> concatenated). Must not match <w:tab/>, <w:tcPr>, <w:tbl>. */
 function paragraphText(chunk) {
-  const parts = [...chunk.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((m) => xmlUnescape(m[1]));
+  const parts = [...chunk.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((m) => xmlUnescape(m[1]));
   return parts.join('');
 }
 
-/** Split document.xml into ordered paragraph chunks with their text. */
+// Text boxes (sidebars in two-column templates) hold whole paragraphs inside a
+// paragraph, and Word stores them twice (DrawingML + VML fallback). Editing one
+// copy would desync the file, so a paragraph that contains a text box is a
+// locked container and its inner paragraphs are never exposed.
+const TEXTBOX = /<w:txbxContent\b|<v:textbox\b/;
+
+/**
+ * Split document.xml into ordered top-level paragraphs. Depth-aware: nested
+ * paragraphs (inside text boxes) belong to their container, not the list.
+ */
 function splitParagraphs(xml) {
-  // Match each <w:p ...>...</w:p> (paragraphs are not nested in each other).
-  const chunks = [...xml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)];
-  return chunks.map((m, i) => ({
-    index: i,
-    start: m.index,
-    end: m.index + m[0].length,
-    xml: m[0],
-    text: paragraphText(m[0]),
-  }));
+  const tag = /<w:p\b[^>]*?(\/?)>|<\/w:p>/g;
+  const spans = [];
+  let depth = 0;
+  let start = -1;
+  let m;
+  while ((m = tag.exec(xml))) {
+    if (m[0] === '</w:p>') {
+      depth--;
+      if (depth === 0 && start >= 0) { spans.push([start, m.index + m[0].length]); start = -1; }
+    } else if (m[1] === '/') {
+      if (depth === 0) spans.push([m.index, m.index + m[0].length]); // empty <w:p/>
+    } else {
+      if (depth === 0) start = m.index;
+      depth++;
+    }
+  }
+  return spans.map(([s, e], i) => {
+    const chunk = xml.slice(s, e);
+    const container = TEXTBOX.test(chunk);
+    return {
+      index: i,
+      start: s,
+      end: e,
+      xml: chunk,
+      container,
+      text: container ? '' : paragraphText(chunk),
+      isList: /<w:numPr\b/.test(chunk),
+      style: (chunk.match(/<w:pStyle\s+w:val="([^"]+)"/) || [])[1] || '',
+    };
+  });
 }
 
 /** Rewrite one paragraph's visible text into its first run, blanking the rest. */
@@ -65,7 +95,7 @@ export async function readParagraphs(buffer) {
   const file = zip.file(DOC);
   if (!file) throw new Error('not a Word .docx (no document.xml)');
   const xml = await file.async('string');
-  const paragraphs = splitParagraphs(xml).map((p) => ({ index: p.index, text: p.text }));
+  const paragraphs = splitParagraphs(xml).map((p) => ({ index: p.index, text: p.text, isList: p.isList, style: p.style, container: p.container }));
   return { paragraphs };
 }
 
@@ -89,6 +119,7 @@ export async function applyEdits(buffer, edits) {
   let changed = 0;
   for (const i of targets) {
     const p = paras[i];
+    if (p.container) continue; // text-box containers are never edited
     const newText = String(edits[i] ?? '');
     if (newText === p.text) continue; // no-op
     const rewritten = rewriteParagraph(p.xml, newText);
