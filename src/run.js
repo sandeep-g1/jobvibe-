@@ -41,16 +41,7 @@ async function main() {
 
   await loadSecretsIntoEnv();
 
-  // The crawl uses one representative profile to decide sources/terms. The
-  // existing "local" user is that profile; its sources are the widest set.
-  const lead = await loadProfileAsync('local');
-  console.log(`\nJobVibe run · storage ${isPostgres ? 'Postgres' : 'SQLite'}`);
-
-  // 1. Shared ingest.
-  const ing = await runIngest({ profile: lead });
-  console.log(`  ingest done: ${ing.fetched} fetched · ${ing.afterIndia} India · ${ing.newJobs} new · ${ing.seconds.toFixed(0)}s`);
-
-  // 2. Decide whom to match.
+  // 1. Decide whom to match — before crawling, so an idle service scrapes nothing.
   let targets;
   if (userArg) {
     targets = [userArg];
@@ -61,10 +52,19 @@ async function main() {
     targets = (await activeProfiles()).map((p) => p.userId);
   }
   if (!targets.length) {
-    console.log('  no schedule-active users — pool refreshed, no reports sent');
+    console.log('\n  no schedule-active users — nothing to do, no jobs fetched\n');
     await closeDB();
     return;
   }
+
+  // The crawl uses one representative profile to decide sources/terms. The
+  // existing "local" user is that profile; its sources are the widest set.
+  const lead = await loadProfileAsync('local');
+  console.log(`\nJobVibe run · storage ${isPostgres ? 'Postgres' : 'SQLite'}`);
+
+  // 2. Shared ingest.
+  const ing = await runIngest({ profile: lead });
+  console.log(`  ingest done: ${ing.fetched} fetched · ${ing.afterIndia} India · ${ing.newJobs} new · ${ing.seconds.toFixed(0)}s`);
 
   // 3. Match each.
   let reported = 0;

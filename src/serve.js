@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -177,6 +177,20 @@ margin-top:18px;font-family:monospace;word-break:break-all}</style></head>
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** Small standalone page for public flows (opt-in link). */
+function noticePage(title, inner) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — JobVibe</title>
+<style>body{font-family:'Segoe UI',Tahoma,sans-serif;background:#f0f2f5;color:#1a1a2e;margin:0;
+min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.c{background:#fff;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:420px;padding:34px 32px}
+.brand{font-weight:800;font-size:1.3rem;color:#0a66c2;margin-bottom:14px}h1{font-size:1.15rem;margin:0 0 10px}
+p{color:#475467;font-size:.92rem;line-height:1.6;margin:0 0 20px}
+.b{display:inline-block;background:#0a66c2;color:#fff;border:0;border-radius:8px;padding:11px 20px;
+font-size:.95rem;font-weight:600;text-decoration:none;cursor:pointer;font-family:inherit}.b:hover{background:#084fa1}
+</style></head><body><div class="c"><div class="brand">JobVibe</div><h1>${esc(title)}</h1>${inner}</div></body></html>`;
+}
+
 let _ready = false;
 /** Load DB + decrypt secrets into env once per (cold) process. Gemini/Resend
  *  keys live encrypted in the DB, so the web process must hydrate them too. */
@@ -230,6 +244,11 @@ export async function handler(req, res) {
     if (!authorised) {
       return send(res, 401, 'application/json', JSON.stringify({ error: 'unauthorised' }));
     }
+    // Nobody has the daily schedule on: don't spin up a runner or crawl anything.
+    if (!(await activeProfiles()).length) {
+      return send(res, 200, 'application/json',
+        JSON.stringify({ started: false, message: 'no schedule-active users — skipped' }));
+    }
     const out = await startRun();
     return send(res, out.started ? 202 : 409, 'application/json',
       JSON.stringify({ ...out, at: new Date().toISOString(), runner: RUNNER }));
@@ -241,6 +260,35 @@ export async function handler(req, res) {
   }
 
   // ---- public auth routes ----
+  // Opt back in to the daily search from the "service paused" email. Public on
+  // purpose (the link carries a per-user random token). GET only shows a
+  // confirm button — mail scanners prefetch links, so the change needs a POST.
+  if (path === '/resume-service') {
+    const t = req.method === 'POST' ? (await readForm(req)).t : url.searchParams.get('t');
+    const match = t && String(t).length >= 32
+      ? (await allProfiles()).find((p) => p.data && p.data.optinToken === t)
+      : null;
+    if (!match) {
+      return send(res, 404, 'text/html; charset=utf-8', noticePage('Link not valid',
+        '<p>This link is invalid or has expired. Sign in to JobVibe and switch on your daily search in Search Settings.</p>' +
+        '<a class="b" href="/login">Sign in</a>'));
+    }
+    const p = match.data;
+    if (req.method === 'POST') {
+      const merged = { ...p, scheduleActive: true, emailEnabled: true, userId: match.userId };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, match.userId);
+      return send(res, 200, 'text/html; charset=utf-8', noticePage('You’re back on',
+        `<p>Thanks${p.name ? `, ${esc(p.name)}` : ''}. Your daily job search is on again. The next report
+         arrives by email after the 08:00 IST run.</p><a class="b" href="/login">Sign in to JobVibe</a>`));
+    }
+    return send(res, 200, 'text/html; charset=utf-8', noticePage('Resume your daily job search?',
+      `<p>Hi${p.name ? ` ${esc(p.name)}` : ''}, JobVibe paused daily searches. Confirm below and we’ll start
+       sending your shortlist of India jobs again every morning.</p>
+       <form method="POST" action="/resume-service"><input type="hidden" name="t" value="${esc(t)}">
+       <button class="b" type="submit">Yes, resume my daily job search</button></form>`));
+  }
+
   if (path === '/login' && req.method === 'GET') {
     return send(res, 200, 'text/html; charset=utf-8', loginPage());
   }

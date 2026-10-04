@@ -149,6 +149,26 @@ export function buildHtml(rows, { profile, runId, siteUrl, topN = 10 }) {
  * Send the digest. Never throws — a mail failure must not fail the pipeline,
  * because the report itself is already saved by this point.
  */
+/** Send one plain notice (not a digest). Returns { sent, id?, reason? }. */
+export async function sendEmail({ to, subject, html }) {
+  if (!emailConfigured()) return { sent: false, reason: 'RESEND_API_KEY is not set' };
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cleanEnv(process.env.RESEND_API_KEY)}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from: cleanEnv(process.env.EMAIL_FROM) || DEFAULT_FROM, to, subject, html }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { sent: false, reason: body?.message || `HTTP ${res.status}` };
+    return { sent: true, id: body.id };
+  } catch (err) {
+    return { sent: false, reason: err.message };
+  }
+}
+
 export async function sendDigest(rows, { profile, runId, siteUrl }) {
   const to = (profile.emailTo || []).filter(Boolean);
   const cc = (profile.emailCc || []).filter(Boolean);

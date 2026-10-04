@@ -34,7 +34,7 @@ jobs:
         run: npm run db:check
 
       - name: Refresh board registry (Mondays only)
-        if: github.event.schedule == '30 2 * * 1' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.user != ''
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run seed
@@ -50,4 +50,4 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           SITE_URL: https://jobvibe-green.vercel.app
-        run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || (github.event.inputs.user != '' && format('--user {0}', github.event.inputs.user)) || '--all-users' }}
+        run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || (github.event.inputs.user != '' && format('--user {0}', github.event.inputs.user)) || '' }}
