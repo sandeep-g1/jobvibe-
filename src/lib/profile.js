@@ -83,7 +83,7 @@ export const FIELDS = [
   { key: 'jobTitles', type: 'list', label: 'Job titles to search',
     help: 'One per line. Drives what is searched and the title part of the score.' },
   { key: 'preferredLocations', type: 'tags', label: 'Preferred locations',
-    help: 'Type a city and press Enter (or pick a suggestion). Add "remote" to accept remote roles.' },
+    help: 'Jobs come only from the cities you add. Add "Remote" for remote roles, a country (e.g. Germany) for that whole country, or "All countries" for everywhere we search: India, UAE, Germany, Ireland, Netherlands, Australia, US, UK.' },
   { key: 'workModes', type: 'modes', label: 'Work modes you accept' },
   { key: 'sources', type: 'sources', label: 'Job portals to search' },
   { key: 'skillBank', type: 'list', label: 'Your skills',

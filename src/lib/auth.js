@@ -120,7 +120,7 @@ function starterProfile({ id, email, name }) {
     jobTitles: [],
     preferredLocations: ['bengaluru', 'remote'],
     workModes: ['On-site', 'Hybrid', 'Remote'],
-    sources: ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'himalayas', 'cutshort'],
+    sources: ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'himalayas', 'cutshort', 'workday'],
     skillBank: [],
     resumeText: '',
     minScore: 45,

@@ -63,8 +63,10 @@ async function main() {
   console.log(`\nJobVibe run · storage ${isPostgres ? 'Postgres' : 'SQLite'}`);
 
   // 2. Shared ingest.
-  const ing = await runIngest({ profile: lead });
-  console.log(`  ingest done: ${ing.fetched} fetched · ${ing.afterIndia} India · ${ing.newJobs} new · ${ing.seconds.toFixed(0)}s`);
+  const served = [];
+  for (const u of targets) served.push(await loadProfileAsync(u));
+  const ing = await runIngest({ profile: lead, profiles: served });
+  console.log(`  ingest done: ${ing.fetched} fetched · ${ing.afterIndia} in chosen countries · ${ing.newJobs} new · ${ing.seconds.toFixed(0)}s`);
 
   // 3. Match each.
   let reported = 0;

@@ -255,11 +255,15 @@ export async function activeProfiles() {
  * Candidate jobs for one user: in the shared pool, link not known-dead, seen
  * recently, and not already shown to this user. This is the per-user match input.
  */
-export async function candidateJobsForUser(userId, { days = 10, limit = 1500 } = {}) {
+export async function candidateJobsForUser(userId, { days = 10, limit = 1500, countries = null } = {}) {
   const d = await db();
   const since = new Date(Date.now() - days * 86400000).toISOString();
+  // Country pre-filter in SQL so the LIMIT is spent on jobs the user can see;
+  // the exact city filter happens in match (geo.inScope).
+  const cc = countries && countries.length ? countries : null;
   return d.query(
     `SELECT j.id, j.fingerprint, j.source, j.source_job_id, j.title, j.company, j.city,
+            j.country, j.location_raw,
             j.work_mode, j.employment_type, j.min_exp, j.max_exp, j.salary_raw, j.jd_text,
             j.skills_required, j.skills_nice, j.apply_url, j.final_url, j.link_status,
             j.posted_at, j.alt_links
@@ -268,9 +272,10 @@ export async function candidateJobsForUser(userId, { days = 10, limit = 1500 } =
       WHERE m.id IS NULL
         AND j.link_status != 'DEAD'
         AND j.last_seen_at > ?
+        ${cc ? `AND j.country IN (${cc.map(() => '?').join(',')})` : ''}
       ORDER BY j.first_seen_at DESC
       LIMIT ?`,
-    [userId, since, limit]
+    [userId, since, ...(cc || []), limit]
   );
 }
 
@@ -291,12 +296,12 @@ export async function upsertJob(j) {
 
   const id = await d.insertReturningId(
     `INSERT INTO jobs (fingerprint, source, source_job_id, title, company, company_id,
-       location_raw, city, work_mode, employment_type, min_exp, max_exp, salary_raw,
+       location_raw, city, country, work_mode, employment_type, min_exp, max_exp, salary_raw,
        jd_text, skills_required, skills_nice, apply_url, link_status, posted_at,
        first_seen_at, last_seen_at, alt_links)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'UNCHECKED',?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'UNCHECKED',?,?,?,?)`,
     [j.fingerprint, j.source, j.source_job_id ?? null, j.title, j.company, j.company_id ?? null,
-     j.location_raw ?? null, j.city ?? null, j.work_mode ?? null, j.employment_type ?? null,
+     j.location_raw ?? null, j.city ?? null, j.cc || 'IN', j.work_mode ?? null, j.employment_type ?? null,
      j.min_exp ?? null, j.max_exp ?? null, j.salary_raw ?? null, j.jd_text ?? null,
      JSON.stringify(j.skills_required || []), JSON.stringify(j.skills_nice || []),
      j.apply_url, j.posted_at ?? null, now(), now(),

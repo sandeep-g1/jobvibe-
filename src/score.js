@@ -180,7 +180,7 @@ export function scoreJob(job, profile, corpus, skillIDF) {
   const nice = JSON.parse(job.skills_nice || '[]');
 
   const must = mustHaveScore(required, profile.skillBank || [], skillIDF);
-  const resumeTokens = contentTokens(profile.resumeText || '');
+  const resumeTokens = contentTokens(profile.cvText || profile.resumeText || '');
   const raw = bm25(resumeTokens, job.jd_text || '', corpus);
   // Saturating transform: BM25 is unbounded, so map it into 0..1 smoothly.
   const semanticPct = raw <= 0 ? 0 : raw / (raw + 12);

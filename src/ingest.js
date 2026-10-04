@@ -11,28 +11,52 @@ import {
   liveCompanies, upsertJob, setLinkStatus, startIngest, finishIngest,
 } from './db.js';
 import { fingerprint, isNearDuplicate } from './lib/normalize.js';
-import { indiaGate } from './lib/india.js';
+import { resolveJob, userScope, COUNTRY_NAMES } from './lib/geo.js';
 import { extractSkills, extractExperience, extractEmploymentType } from './lib/skills.js';
 import { mapLimit } from './lib/http.js';
 
 const BOARD_IDS = new Set(Object.keys(BOARD_ADAPTERS));
 const log = (m) => console.log(`  ingest · ${m}`);
 
+/** Union of search terms across the users being served, case-insensitively de-duplicated. */
+export function unionTerms(profiles, cap = 15) {
+  const seen = new Set();
+  const out = [];
+  // Round-robin so every user gets their first titles in before anyone's 5th.
+  const lists = profiles.map((p) => (p?.searchTerms?.length ? p.searchTerms : p?.jobTitles || []));
+  for (let i = 0; out.length < cap && lists.some((l) => i < l.length); i++) {
+    for (const l of lists) {
+      const t = String(l[i] || '').trim();
+      if (t && !seen.has(t.toLowerCase()) && out.length < cap) { seen.add(t.toLowerCase()); out.push(t); }
+    }
+  }
+  return out;
+}
+
 /**
  * Crawl every source, refresh the shared jobs pool.
- * @param {object} opts.profile  a representative profile (its `sources` and
- *   `searchTerms`/`jobTitles` decide which adapters and query terms to run).
+ * @param {object}   opts.profile   representative profile (fallback for sources/terms).
+ * @param {object[]} opts.profiles  the users this run serves: their job titles are
+ *   searched, their sources used, and only the countries their chosen
+ *   locations cover are crawled.
  * @returns {object} stats for the ingest_runs row.
  */
-export async function runIngest({ profile } = {}) {
+export async function runIngest({ profile, profiles = [] } = {}) {
   const t0 = Date.now();
   const id = await startIngest();
   const errors = [];
   const perSource = {};
   const raw = [];
 
-  const sources = profile?.sources || Object.keys(ADAPTERS);
-  const terms = (profile?.searchTerms?.length ? profile.searchTerms : profile?.jobTitles || []).slice(0, 6);
+  const served = profiles.length ? profiles : [profile].filter(Boolean);
+  const sources = [...new Set([
+    ...served.flatMap((p) => p?.sources || []),
+    ...(served.length ? [] : Object.keys(ADAPTERS)),
+  ])];
+  const terms = unionTerms(served);
+  const crawl = new Set(served.flatMap((p) => [...userScope(p).crawl]));
+  if (!crawl.size) crawl.add('IN');
+  log(`countries: ${[...crawl].map((c) => COUNTRY_NAMES[c]).join(', ')} · ${terms.length} search terms`);
 
   // Tier B — verified boards, keyless
   const boardSources = sources.filter((s) => BOARD_IDS.has(s));
@@ -55,11 +79,15 @@ export async function runIngest({ profile } = {}) {
     const tasks = [];
     for (const { key, adapter } of ready) {
       const budget = adapter.maxTermsPerRun ?? terms.length;
-      for (const term of terms.slice(0, budget)) tasks.push({ key, adapter, term });
+      // Workday searches each chosen country; the other query sources are India-only today.
+      const ccs = key === 'workday' ? [...crawl] : crawl.has('IN') ? ['IN'] : [];
+      for (const country of ccs) {
+        for (const term of terms.slice(0, budget)) tasks.push({ key, adapter, term, country });
+      }
     }
-    await mapLimit(tasks, 3, async ({ key, adapter, term }) => {
+    await mapLimit(tasks, 3, async ({ key, adapter, term, country }) => {
       try {
-        const { rows, error } = await adapter.fetchQuery({ term, location: profile?.baseCity || 'India' });
+        const { rows, error } = await adapter.fetchQuery({ term, country, location: profile?.baseCity || 'India' });
         if (error) errors.push(error);
         perSource[key] = (perSource[key] || 0) + rows.length;
         raw.push(...rows);
@@ -70,18 +98,18 @@ export async function runIngest({ profile } = {}) {
   }
   log(`${raw.length} postings fetched`);
 
-  // Normalise + India gate
+  // Normalise + country gate: keep only postings in a country someone chose.
   const usable = raw.filter(isUsable);
   const indian = [];
   for (const r of usable) {
-    const gate = indiaGate({
+    const g = resolveJob({
       location: r.location_raw, isRemote: r.is_remote, workplaceType: r.workplace_type,
       country: r.country, jdText: r.jd_text,
     });
-    if (!gate.isIndia) continue;
-    indian.push({ ...r, city: r.city || gate.city, work_mode: gate.workMode });
+    if (!g.cc || !crawl.has(g.cc)) continue;
+    indian.push({ ...r, cc: g.cc, city: r.city || g.city, work_mode: g.workMode });
   }
-  log(`${indian.length} India postings`);
+  log(`${indian.length} postings in the chosen countries`);
 
   // Collapse duplicates within this crawl (cross-portal + reposts). Per-user
   // "already seen" filtering does NOT happen here — that is per user, in match.

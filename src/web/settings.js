@@ -8,11 +8,18 @@ const MODES = ['On-site', 'Hybrid', 'Remote'];
 // Suggestions for the location chip input (datalist). Not a whitelist — the
 // user can type any city; these just make the common ones one click away.
 const CITY_SUGGEST = [
-  'Remote', 'Bengaluru', 'Mumbai', 'Delhi', 'Gurugram', 'Noida', 'Hyderabad',
-  'Chennai', 'Pune', 'Kolkata', 'Ahmedabad', 'Coimbatore', 'Kochi', 'Thiruvananthapuram',
-  'Chandigarh', 'Jaipur', 'Indore', 'Nagpur', 'Bhubaneswar', 'Visakhapatnam',
-  'Mysuru', 'Mangaluru', 'Vadodara', 'Surat', 'Lucknow', 'Bhopal', 'Nashik',
-  'Gandhinagar', 'Faridabad', 'Ghaziabad', 'Madurai', 'Tiruchirappalli', 'Vijayawada',
+  'Remote', 'All countries',
+  // India
+  'Bengaluru', 'Mumbai', 'Delhi', 'Gurugram', 'Noida', 'Hyderabad', 'Chennai', 'Pune', 'Kolkata',
+  'Ahmedabad', 'Coimbatore', 'Kochi', 'Thiruvananthapuram', 'Chandigarh', 'Jaipur', 'Indore',
+  'Nagpur', 'Bhubaneswar', 'Visakhapatnam', 'Mysuru', 'Mangaluru', 'Vadodara', 'Surat', 'Lucknow', 'Goa',
+  // Abroad: pick a city, or a whole country
+  'Dubai', 'Abu Dhabi', 'Sharjah', 'Berlin', 'Munich', 'Frankfurt', 'Hamburg', 'Cologne', 'Stuttgart',
+  'Dusseldorf', 'Dublin', 'Cork', 'Galway', 'Amsterdam', 'Rotterdam', 'The Hague', 'Utrecht', 'Eindhoven',
+  'Sydney', 'Melbourne', 'Brisbane', 'Perth', 'Adelaide', 'Canberra', 'London', 'Manchester',
+  'Edinburgh', 'Birmingham', 'Glasgow', 'Leeds', 'Bristol', 'Cambridge', 'New York', 'San Francisco',
+  'Seattle', 'Austin', 'Boston', 'Chicago', 'Dallas',
+  'India', 'UAE', 'Germany', 'Ireland', 'Netherlands', 'Australia', 'United States', 'United Kingdom',
 ];
 
 // [id, label, keyless]
@@ -23,6 +30,7 @@ const SOURCES = [
   ['smartrecruiters', 'SmartRecruiters', true],
   ['himalayas', 'Himalayas — remote roles open to India', true],
   ['cutshort', 'Cutshort — India tech roles (Naukri-class)', true],
+  ['workday', 'Workday — large employers & GCCs (Accenture, JLL, State Street…)', true],
   ['jsearch', 'Google for Jobs (JSearch)', false],
   ['adzuna', 'Adzuna', false],
   ['careerjet', 'Careerjet', false],

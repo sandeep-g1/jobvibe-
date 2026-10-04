@@ -7,13 +7,16 @@
 import { ADAPTERS } from './adapters/index.js';
 import {
   candidateJobsForUser, insertMatch, matchesForRun, appliedSet,
-  startRun, finishRun, latestIngest,
+  startRun, finishRun, latestIngest, defaultResume,
 } from './db.js';
 import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score.js';
 import { verifyJobs, STATUS } from './verify.js';
 import { writeReport, buildRows } from './report.js';
 import { sendDigest } from './email.js';
 import { loadProfileAsync } from './lib/profile.js';
+import { userScope, inScope } from './lib/geo.js';
+import { aiRerank } from './lib/rerank.js';
+import { extractText } from './lib/resume.js';
 
 const log = (m) => console.log(`  match · ${m}`);
 
@@ -27,10 +30,23 @@ const log = (m) => console.log(`  match · ${m}`);
 export async function runMatch(userId, { email = true, profile: pre } = {}) {
   const profile = pre || await loadProfileAsync(userId);
   profile.userId = userId;
+  // Score against the whole CV, not the short autofill summary.
+  if (!profile.cvText) {
+    try {
+      const cv = await defaultResume(userId);
+      if (cv?.content_b64) {
+        const t = await extractText(Buffer.from(cv.content_b64, 'base64'), cv.filename || '', '');
+        if (t.ok) profile.cvText = t.text;
+      }
+    } catch { /* fall back to resumeText */ }
+  }
   const runId = await startRun(userId);
 
-  // Candidate pool: fresh, not-dead, unseen by this user.
-  const poolRows = await candidateJobsForUser(userId, { days: 10 });
+  // Candidate pool: fresh, not-dead, unseen by this user, inside the locations
+  // they chose (cities only, unless they picked a whole country or "All countries").
+  const scope = userScope(profile);
+  const poolRows = (await candidateJobsForUser(userId, { days: 10, countries: scope.all ? null : [...scope.crawl] }))
+    .filter((j) => inScope(j, scope));
   if (!poolRows.length) {
     log(`${userId}: pool empty — nothing new`);
     await finishRun(runId, { reported: 0 });
@@ -55,7 +71,12 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
     comp: competitionSignal(job),
   }));
 
+  // AI recruiter pass over the strongest keyword candidates. When it works,
+  // only jobs it actually read can reach the report.
+  const ai = await aiRerank(profile, scored);
+  log(`${userId}: AI judged ${ai.judged}${ai.ok ? '' : ` (keyword-only: ${ai.error || 'off'})`}`);
   const above = scored
+    .filter((s) => !ai.ok || s.aiJudged)
     .filter((s) => s.result.score >= (profile.minScore ?? 0))
     .sort((a, b) => b.result.score - a.result.score);
 
