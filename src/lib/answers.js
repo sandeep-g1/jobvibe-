@@ -123,7 +123,9 @@ export function pickOption(answer, options = []) {
   // Numbers: notice periods arrive as a number of days; years of experience
   // as a numeric string. Choose the option whose range contains the value.
   const isDays = typeof answer === 'number' || /^\d+ days?$/.test(a);
-  const num = isDays ? Number(String(answer).split(' ')[0]) : /^\d+(\.\d+)?$/.test(a) ? Number(a) : null;
+  // Plain numbers and amounts with a unit ("12 LPA", "4 years") compare numerically against bands.
+  const unitNum = a.match(/^(\d+(?:\.\d+)?)\s*(lpa|lakhs?|l|years?|yrs?)?$/);
+  const num = isDays ? Number(String(answer).split(' ')[0]) : unitNum ? Number(unitNum[1]) : null;
   if (num != null) {
     if (isDays && num === 0) {
       const im = opts.find((x) => /immediate|right away|^now|0 ?days|serving/.test(x.l)); if (im) return im.o;
@@ -303,7 +305,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (named.length && /(currently )?(based|located|living|residing) in/.test(t)) {
     return yesno(named.some((r) => r.city === home.city), 'your city');
   }
-  if (named.length && /work (from|in|at)|office|open to|relocat|commute|on-?site in/.test(t)) {
+  if (named.length && /work(ing)? (from|in|at|out of)|office|open to|relocat|commute|on-?site in|comfortable (with )?(working|being based)/.test(t)) {
     const scope = userScope(profile);
     const ok = named.some((r) => r.city === home.city || scope.cities.get(r.city) === r.cc || scope.countries.has(r.cc));
     if (ok || a.relocate === 'yes') return yesno(true, ok ? 'your chosen locations' : 'willing to relocate');
@@ -373,12 +375,22 @@ export function answerQuestion(q, profile, ctx = {}) {
 
   // ---- consent boxes ----
   if (/\b(i )?(agree|consent|acknowledge|certify|confirm|accept)(?!ments?\b)|privacy (policy|notice)|data (processing|protection)|gdpr|terms (and|&) conditions|information policy|have read/.test(t)) {
-    if (/marketing|newsletter|future (job|opportunit)|talent (pool|community)|sms|text message/.test(t)) return yesno(false, 'no marketing');
+    // Marketing and talent-pool opt-ins: never ticked. A required one goes to the user.
+    if (/marketing|newsletter|sms|text message|whatsapp updates|talent (pool|community|network)|future (job|role|position|opening|vacanc|opportunit)|other (current or future |open |suitable )?(roles|positions|jobs|opportunities|openings)|keep (my|your) (data|information|details|cv|resume) (on file|for)|retain (my|your) .{0,40}for/.test(t)) {
+      if (q.required) return { needsHuman: true, reason: 'talent-pool / marketing consent is required here' };
+      // A lone checkbox has no "No" option: declining means leaving it unticked.
+      return q.type === 'checkbox' ? { answer: false, source: 'no marketing / talent pool' } : yesno(false, 'no marketing / talent pool');
+    }
     return a.consentStandard ? yesno(true, 'standard consent (you allowed this)') : { needsHuman: true, reason: 'consent box: you have not allowed the agent to tick these' };
   }
 
+  // ---- follow-ups to an earlier yes/no ("If yes, please describe") ----
+  if (/^(if (yes|so|applicable|you (selected|answered|chose) yes|you have)|please (specify|describe|explain) if)\b/.test(t)) {
+    return q.required ? { needsHuman: true, reason: 'follow-up detail' } : { answer: '', source: 'follow-up, left blank' };
+  }
+
   // ---- open-ended ----
-  if (q.type === 'textarea' || /why (do you|are you|this)|tell us|describe|cover letter|additional information|anything else/.test(t)) {
+  if (q.type === 'textarea' || /why (do you|are you|this)|tell us|describe|cover letter|additional information|anything else|proud of|something you|a time (when|you)|an example of|share (a|an|your)|what (excites|interests|motivates|attracts)/.test(t)) {
     return { essay: true, reason: 'open-ended: AI drafts it for your approval' };
   }
 

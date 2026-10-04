@@ -1,0 +1,16 @@
+{
+  "name": "jobvibe-worker",
+  "private": true,
+  "type": "module",
+  "description": "Always-on worker: applies to approved jobs and reads job-hunt inboxes. Runs on the cloud server, not on Vercel.",
+  "scripts": {
+    "start": "node --no-warnings index.js",
+    "dry": "node --no-warnings index.js --dry-run --once"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "imapflow": "^1.0.170",
+    "mailparser": "^3.7.1",
+    "nodemailer": "^6.9.16"
+  }
+}
