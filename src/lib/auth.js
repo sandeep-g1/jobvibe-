@@ -115,10 +115,10 @@ function starterProfile({ id, email, name }) {
   return {
     userId: id,
     name: (name || email.split('@')[0]).trim(),
-    totalExpYears: 0,
-    baseCity: 'bengaluru',
+    totalExpYears: null, // asked during onboarding
+    baseCity: '',
     jobTitles: [],
-    preferredLocations: ['bengaluru', 'remote'],
+    preferredLocations: [], // defaults to their city + Remote at onboarding
     workModes: ['On-site', 'Hybrid', 'Remote'],
     sources: ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'himalayas', 'cutshort', 'workday'],
     skillBank: [],

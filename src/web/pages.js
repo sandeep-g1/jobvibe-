@@ -1,6 +1,7 @@
 // Dashboard ("face page") and the reports index. Same visual language as the
 // report itself so the whole app reads as one product.
-import { dashboardStats, allRuns } from '../db.js';
+import { dashboardStats, allRuns, resumeMeta } from '../db.js';
+import { missingProfile } from '../lib/profile.js';
 import { FORM_CSS } from './settings.js';
 
 export const esc = (s) =>
@@ -157,20 +158,30 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
 
   const recMap = Object.fromEntries(s.byRec.map((r) => [r.r, r.c]));
   const maxSrc = Math.max(1, ...s.bySource.map((r) => r.c));
+  const missing = missingProfile(profile, !!(await resumeMeta(userId)));
+  const titles = profile.jobTitles || [];
+  const locs = profile.preferredLocations || [];
 
   const body = `
 <div class="hero">
   <h1>${esc(profile.name)}</h1>
-  <p>${esc(profile.jobTitles.slice(0, 4).join(' · '))}</p>
+  <p>${titles.length ? esc(titles.slice(0, 4).join(' · ')) : 'No job titles yet'}</p>
   <div class="hero-chips">
-    <span class="hero-chip">${profile.totalExpYears} years experience</span>
-    <span class="hero-chip">${esc(profile.preferredLocations.slice(0, 3).join(', '))}</span>
-    <span class="hero-chip">${esc(profile.workModes.join(' / '))}</span>
-    <span class="hero-chip">${profile.skillBank.length} skills</span>
+    ${profile.totalExpYears != null ? `<span class="hero-chip">${profile.totalExpYears} years experience</span>` : ''}
+    ${locs.length ? `<span class="hero-chip">${esc(locs.slice(0, 3).join(', '))}</span>` : ''}
+    <span class="hero-chip">${esc((profile.workModes || []).join(' / '))}</span>
+    <span class="hero-chip">${(profile.skillBank || []).length} skills</span>
   </div>
 </div>
 
 <div class="wrap">
+  ${missing.length ? `
+  <div class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b;background:#fffbeb">
+    <h3 style="color:#92400e">Finish your profile to get job matches</h3>
+    <p style="font-size:.9rem;color:#78350f;margin-bottom:12px">Still missing: <b>${esc(missing.join(', '))}</b>.
+      Until this is done we can't search or match jobs for you.</p>
+    <a class="btn" href="${missing.includes('your CV') ? '/onboarding' : '/onboarding/review'}">Finish setup</a>
+  </div>` : ''}
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card"><div class="stat-n">${s.runs}</div><div class="stat-l">Reports generated</div>
       <div class="stat-sub">${latest ? new Date(latest.started_at).toLocaleDateString('en-IN') : 'none yet'}</div></div>
@@ -210,7 +221,7 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
       <div class="card-head"><h3>Search profile</h3>
         <a class="edit-link" href="/settings#profile">✎ Edit</a></div>
       <div class="kv"><span>Base city</span><span>${esc(profile.baseCity)}</span></div>
-      <div class="kv"><span>Experience</span><span>${profile.totalExpYears} years</span></div>
+      <div class="kv"><span>Experience</span><span>${profile.totalExpYears != null ? `${profile.totalExpYears} years` : '—'}</span></div>
       <div class="kv"><span>Preferred locations</span><span>${esc(profile.preferredLocations.join(', '))}</span></div>
       <div class="kv"><span>Work modes</span><span>${esc(profile.workModes.join(', '))}</span></div>
       <div class="kv"><span>Minimum score</span><span>${profile.minScore}</span></div>

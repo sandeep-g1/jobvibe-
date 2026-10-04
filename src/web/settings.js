@@ -7,7 +7,7 @@ const MODES = ['On-site', 'Hybrid', 'Remote'];
 
 // Suggestions for the location chip input (datalist). Not a whitelist — the
 // user can type any city; these just make the common ones one click away.
-const CITY_SUGGEST = [
+export const CITY_SUGGEST = [
   'Remote', 'All countries',
   // India
   'Bengaluru', 'Mumbai', 'Delhi', 'Gurugram', 'Noida', 'Hyderabad', 'Chennai', 'Pune', 'Kolkata',
@@ -36,6 +36,38 @@ const SOURCES = [
   ['careerjet', 'Careerjet', false],
   ['jooble', 'Jooble', false],
 ];
+
+/** Chip-input behaviour, shared by Settings and onboarding. Values are newline-joined. */
+export const TAGS_SCRIPT = String.raw`<script>
+function tagSync(wrap){
+  var vals = [].map.call(wrap.querySelectorAll('.tag-chip'), function(c){ return c.firstChild.textContent.trim(); });
+  wrap.querySelector('input[type=hidden]').value = vals.join('\n');
+}
+function tagAdd(btn){
+  var wrap = btn.closest('.tags');
+  var input = wrap.querySelector('.tag-input');
+  var raw = wrap.getAttribute('data-split') ? (input.value || '').split(',') : [input.value || ''];
+  for (var i=0;i<raw.length;i++){
+    var v = raw[i].trim(); if(!v) continue;
+    var exists = [].some.call(wrap.querySelectorAll('.tag-chip'), function(c){
+      return c.firstChild.textContent.trim().toLowerCase() === v.toLowerCase();
+    });
+    if (exists) continue;
+    var chip = document.createElement('span'); chip.className = 'tag-chip';
+    chip.appendChild(document.createTextNode(v));
+    var x = document.createElement('button'); x.type='button'; x.textContent='×';
+    x.setAttribute('aria-label','Remove'); x.onclick = function(){ tagDel(this); };
+    chip.appendChild(x);
+    wrap.querySelector('.tag-chips').appendChild(chip);
+  }
+  input.value = ''; input.focus(); tagSync(wrap);
+}
+function tagDel(btn){ var wrap = btn.closest('.tags'); btn.parentNode.remove(); tagSync(wrap); }
+function tagKey(e, input){
+  var split = input.closest('.tags').getAttribute('data-split');
+  if (e.key === 'Enter' || (split && e.key === ',')) { e.preventDefault(); tagAdd(input.parentNode.querySelector('.tag-btn')); }
+}
+</script>`;
 
 export const FORM_CSS = `
   form .fld { margin-bottom:15px; }
@@ -72,7 +104,7 @@ export const FORM_CSS = `
   .tag-btn { padding:8px 16px; }
 `;
 
-function renderField(f, profile) {
+export function renderField(f, profile) {
   const val = profile[f.key];
   const help = f.help ? `<span class="help">${esc(f.help)}</span>` : '';
 
@@ -106,17 +138,18 @@ function renderField(f, profile) {
     const chips = arr.map((c) =>
       `<span class="tag-chip">${esc(c)}<button type="button" onclick="tagDel(this)" aria-label="Remove">×</button></span>`
     ).join('');
-    const opts = CITY_SUGGEST.map((c) => `<option value="${esc(c)}">`).join('');
+    const suggest = f.suggest === 'cities' ? CITY_SUGGEST : Array.isArray(f.suggest) ? f.suggest : [];
+    const opts = suggest.map((c) => `<option value="${esc(c)}">`).join('');
     return `<div class="fld"><label>${esc(f.label)}</label>
-      <div class="tags" data-key="${esc(f.key)}">
+      <div class="tags" data-key="${esc(f.key)}"${f.split ? ' data-split=","' : ''}>
         <div class="tag-chips">${chips}</div>
         <div class="tag-add">
-          <input type="text" class="tag-input" list="${listId}" placeholder="Type a city and press Enter…"
+          <input type="text" class="tag-input" list="${listId}" placeholder="${esc(f.placeholder || 'Type and press Enter…')}"
                  onkeydown="tagKey(event,this)" autocomplete="off">
           <button type="button" class="btn tag-btn" onclick="tagAdd(this)">Add</button>
         </div>
         <datalist id="${listId}">${opts}</datalist>
-        <input type="hidden" name="${esc(f.key)}" value="${esc(arr.join(','))}">
+        <input type="hidden" name="${esc(f.key)}" value="${esc(arr.join('\n'))}">
       </div>${help}</div>`;
   }
 
@@ -260,39 +293,8 @@ export function settingsPage(profile, fields, opts = {}) {
   </form>
 </div>
 
+${TAGS_SCRIPT}
 <script>
-// ---- location chip input ----
-function tagSync(wrap){
-  var vals = [].map.call(wrap.querySelectorAll('.tag-chip'), function(c){
-    return c.firstChild.textContent.trim();
-  });
-  wrap.querySelector('input[type=hidden]').value = vals.join(',');
-}
-function tagAdd(btn){
-  var wrap = btn.closest('.tags');
-  var input = wrap.querySelector('.tag-input');
-  var raw = (input.value || '').split(',');
-  for (var i=0;i<raw.length;i++){
-    var v = raw[i].trim(); if(!v) continue;
-    var exists = [].some.call(wrap.querySelectorAll('.tag-chip'), function(c){
-      return c.firstChild.textContent.trim().toLowerCase() === v.toLowerCase();
-    });
-    if (exists) continue;
-    var chip = document.createElement('span'); chip.className = 'tag-chip';
-    chip.appendChild(document.createTextNode(v));
-    var x = document.createElement('button'); x.type='button'; x.textContent='×';
-    x.setAttribute('aria-label','Remove'); x.onclick = function(){ tagDel(this); };
-    chip.appendChild(x);
-    wrap.querySelector('.tag-chips').appendChild(chip);
-  }
-  input.value = ''; input.focus(); tagSync(wrap);
-}
-function tagDel(btn){
-  var wrap = btn.closest('.tags'); btn.parentNode.remove(); tagSync(wrap);
-}
-function tagKey(e, input){
-  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); tagAdd(input.parentNode.querySelector('.tag-btn')); }
-}
 var runStart = 0, runTimer = null;
 var STAGES = [
   [0,   'Queuing the search…'],

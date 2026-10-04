@@ -80,9 +80,11 @@ export const FIELDS = [
   { key: 'name', type: 'text', label: 'Full name' },
   { key: 'totalExpYears', type: 'number', label: 'Years of experience' },
   { key: 'baseCity', type: 'text', label: 'Base city' },
-  { key: 'jobTitles', type: 'list', label: 'Job titles to search',
-    help: 'One per line. Drives what is searched and the title part of the score.' },
-  { key: 'preferredLocations', type: 'tags', label: 'Preferred locations',
+  { key: 'jobTitles', type: 'tags', label: 'Job titles to search',
+    placeholder: 'e.g. Claims Analyst, then Enter',
+    help: 'The roles you want. These are what we search for and what the match score checks. Add 3-6 close variations.' },
+  { key: 'preferredLocations', type: 'tags', label: 'Preferred locations', suggest: 'cities', split: true,
+    placeholder: 'Type a city and press Enter…',
     help: 'Jobs come only from the cities you add. Add "Remote" for remote roles, a country (e.g. Germany) for that whole country, or "All countries" for everywhere we search: India, UAE, Germany, Ireland, Netherlands, Australia, US, UK.' },
   { key: 'workModes', type: 'modes', label: 'Work modes you accept' },
   { key: 'sources', type: 'sources', label: 'Job portals to search' },
@@ -107,11 +109,13 @@ export const FIELDS = [
 ];
 
 /** Coerce submitted form values into the profile shape. */
-export function normaliseProfile(input, previous = {}) {
+export function normaliseProfile(input, previous = {}, only = null) {
   const out = { ...previous };
   const lines = (v) => String(v || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 
-  for (const f of FIELDS) {
+  // `only`: a form that shows a subset of fields must not reset the rest
+  // (a missing checkbox would otherwise read as "off").
+  for (const f of only ? FIELDS.filter((x) => only.includes(x.key)) : FIELDS) {
     let raw = input[f.key];
     // An unticked checkbox submits nothing at all.
     if (f.type === 'toggle' && raw === undefined) raw = 'off';
@@ -122,8 +126,8 @@ export function normaliseProfile(input, previous = {}) {
     } else if (f.type === 'list') {
       out[f.key] = lines(raw);
     } else if (f.type === 'tags') {
-      // Chip input submits a comma/newline separated value; split on both.
-      out[f.key] = String(raw || '').split(/[\r\n,]+/).map((x) => x.trim()).filter(Boolean);
+      // Chips submit newline-joined; fields that allow it (locations) also split on commas.
+      out[f.key] = String(raw || '').split(f.split ? /[\r\n,]+/ : /[\r\n]+/).map((x) => x.trim()).filter(Boolean);
     } else if (f.type === 'modes' || f.type === 'sources') {
       out[f.key] = Array.isArray(raw) ? raw.filter(Boolean) : lines(raw);
     } else if (f.type === 'toggle') {
@@ -136,4 +140,18 @@ export function normaliseProfile(input, previous = {}) {
   delete out._source;
   delete out._updatedAt;
   return out;
+}
+
+/**
+ * What a profile still needs before matching can work. Empty array = complete.
+ * @param {object} p       profile
+ * @param {boolean} hasCv  whether a CV file is on record
+ */
+export function missingProfile(p = {}, hasCv = false) {
+  const miss = [];
+  if (!hasCv) miss.push('your CV');
+  if (!(p.jobTitles || []).filter(Boolean).length) miss.push('job titles to search');
+  if (p.totalExpYears == null || p.totalExpYears === '') miss.push('years of experience');
+  if (!(p.preferredLocations || []).filter(Boolean).length) miss.push('where you want to work');
+  return miss;
 }

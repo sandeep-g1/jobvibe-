@@ -16,13 +16,16 @@ import { emailConfigured } from './email.js';
 import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED } from './lib/secrets.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
-import { loadProfileAsync, FIELDS, normaliseProfile } from './lib/profile.js';
+import { loadProfileAsync, FIELDS, normaliseProfile, missingProfile } from './lib/profile.js';
+
+// Fields the onboarding confirm step shows (and is allowed to change).
+const REVIEW_KEYS = ['jobTitles', 'preferredLocations', 'workModes', 'totalExpYears', 'skillBank', 'stretchSkills'];
 import {
   currentUser, signup, login, startSession, endSession,
   sessionCookie, clearCookie,
 } from './lib/auth.js';
 import { loginPage, signupPage } from './web/auth.js';
-import { onboardingPage } from './web/onboarding.js';
+import { onboardingPage, reviewPage } from './web/onboarding.js';
 import { extractText } from './lib/resume.js';
 import { parseResume, geminiConfigured } from './lib/gemini.js';
 import Busboy from 'busboy';
@@ -278,9 +281,14 @@ export async function handler(req, res) {
       const merged = { ...p, scheduleActive: true, emailEnabled: true, userId: match.userId };
       delete merged._source; delete merged._updatedAt;
       await saveProfileRow(merged, match.userId);
+      const miss = missingProfile(p, !!(await resumeMeta(match.userId)));
       return send(res, 200, 'text/html; charset=utf-8', noticePage('You’re back on',
-        `<p>Thanks${p.name ? `, ${esc(p.name)}` : ''}. Your daily job search is on again. The next report
-         arrives by email after the 08:00 IST run.</p><a class="b" href="/login">Sign in to JobVibe</a>`));
+        miss.length
+          ? `<p>Thanks${p.name ? `, ${esc(p.name)}` : ''}. Your daily search is on, but your profile is missing
+             <b>${esc(miss.join(', '))}</b>, so we can't match jobs for you yet. Sign in and finish setup; it takes
+             two minutes.</p><a class="b" href="/login">Sign in and finish setup</a>`
+          : `<p>Thanks${p.name ? `, ${esc(p.name)}` : ''}. Your daily job search is on again. The next report
+             arrives by email after the 08:00 IST run.</p><a class="b" href="/login">Sign in to JobVibe</a>`));
     }
     return send(res, 200, 'text/html; charset=utf-8', noticePage('Resume your daily job search?',
       `<p>Hi${p.name ? ` ${esc(p.name)}` : ''}, JobVibe paused daily searches. Confirm below and we’ll start
@@ -480,6 +488,12 @@ export async function handler(req, res) {
     }
 
     if (path === '/api/run' && req.method === 'POST') {
+      const miss = missingProfile(await profile(uid), !!(await resumeMeta(uid)));
+      if (miss.length) {
+        return send(res, 409, 'application/json', JSON.stringify({
+          started: false, message: `Finish your profile first: add ${miss.join(', ')}.`,
+        }));
+      }
       const knownRuns = (await allRuns(uid)).length;
       const out = await startRun(uid);
       return send(res, out.started ? 202 : 409, 'application/json',
@@ -503,41 +517,71 @@ export async function handler(req, res) {
         const n = Number(fields.totalExpYears); if (Number.isFinite(n)) merged.totalExpYears = n;
       }
 
-      let autofillErr = null;
-      if (file && file.buffer && file.buffer.length) {
-        if (file.truncated) autofillErr = 'That file is over 6 MB — please upload a smaller CV.';
-        else {
-          const ext = await extractText(file.buffer, file.filename, file.mime);
-          if (!ext.ok) autofillErr = ext.error;
-          else {
-            let parsed = null;
-            if (geminiConfigured()) {
-              const pr = await parseResume(ext.text);
-              if (pr.ok) {
-                parsed = pr.data;
-                // Fill fields the user left blank; never overwrite what they typed.
-                if (!merged.name && parsed.name) merged.name = parsed.name;
-                if (!merged.baseCity && parsed.baseCity) merged.baseCity = parsed.baseCity;
-                if (!merged.totalExpYears && parsed.totalExpYears) merged.totalExpYears = parsed.totalExpYears;
-                if (parsed.jobTitles?.length) merged.jobTitles = parsed.jobTitles;
-                if (parsed.skillBank?.length) merged.skillBank = parsed.skillBank;
-                if (parsed.resumeText) merged.resumeText = parsed.resumeText;
-                if (parsed.email && !(merged.emailTo || []).length) merged.emailTo = [parsed.email];
-              } else {
-                autofillErr = `Autofill could not read that CV (${pr.error}). Details saved; you can edit them next.`;
-              }
-            }
-            await saveResume({
-              userId: uid, filename: file.filename, kind: ext.kind,
-              contentB64: file.buffer.toString('base64'), parsed,
-            });
+      const onFile = await resumeMeta(uid);
+      const again = (error) => send(res, 400, 'text/html; charset=utf-8',
+        onboardingPage({ profile: merged, resume: onFile, geminiOn: geminiConfigured(), error }));
+      const hasUpload = !!(file && file.buffer && file.buffer.length);
+      if (!hasUpload && !onFile) return again('Please upload your CV. It is what jobs are matched against.');
+
+      let autofillErr = geminiConfigured() ? null : 'gemini off';
+      if (hasUpload) {
+        if (file.truncated) return again('That file is over 6 MB. Please upload a smaller CV.');
+        const ext = await extractText(file.buffer, file.filename, file.mime);
+        if (!ext.ok) return again(ext.error || 'Could not read that file. Try a .docx or .pdf.');
+        if ((ext.text || '').trim().length < 200) {
+          return again('That file has almost no readable text (a scanned image?). Please upload a .docx or a text-based PDF.');
+        }
+        let parsed = null;
+        if (geminiConfigured()) {
+          const pr = await parseResume(ext.text);
+          if (pr.ok) {
+            parsed = pr.data;
+            // Fill what the user left blank; never overwrite what they typed.
+            if (!merged.name && parsed.name) merged.name = parsed.name;
+            if (!merged.baseCity && parsed.baseCity) merged.baseCity = parsed.baseCity;
+            if (merged.totalExpYears == null && parsed.totalExpYears != null) merged.totalExpYears = parsed.totalExpYears;
+            if (parsed.jobTitles?.length) merged.jobTitles = parsed.jobTitles;
+            if (parsed.skillBank?.length) merged.skillBank = parsed.skillBank;
+            if (parsed.resumeText) merged.resumeText = parsed.resumeText;
+            if (parsed.email && !(merged.emailTo || []).length) merged.emailTo = [parsed.email];
+          } else {
+            autofillErr = pr.error || 'autofill failed';
           }
         }
+        await saveResume({
+          userId: uid, filename: file.filename, kind: ext.kind,
+          contentB64: file.buffer.toString('base64'), parsed,
+        });
       }
 
+      // Sensible default for locations: where they live, plus remote.
+      if (!(merged.preferredLocations || []).length && merged.baseCity) {
+        merged.preferredLocations = [merged.baseCity, 'Remote'];
+      }
       await saveProfileRow(merged, uid);
-      const q = autofillErr ? `welcome=1&autofill=err` : `welcome=1&autofilled=1`;
-      res.writeHead(303, { Location: `/settings?${q}` });
+      res.writeHead(303, { Location: `/onboarding/review${autofillErr ? '?autofill=err' : ''}` });
+      return res.end();
+    }
+
+    if (path === '/onboarding/review' && req.method === 'GET') {
+      const note = url.searchParams.get('autofill') === 'err'
+        ? 'We could not read your CV automatically. Please fill in what you are looking for.'
+        : null;
+      return send(res, 200, 'text/html; charset=utf-8', reviewPage({ profile: await profile(uid), note }));
+    }
+
+    if (path === '/onboarding/review' && req.method === 'POST') {
+      const form = await readForm(req);
+      const prev = await profile(uid);
+      const merged = normaliseProfile(form, prev, REVIEW_KEYS);
+      merged.userId = uid;
+      const miss = missingProfile(merged, true).filter((m) => m !== 'your CV');
+      if (miss.length) {
+        return send(res, 400, 'text/html; charset=utf-8',
+          reviewPage({ profile: merged, error: `Please add ${miss.join(' and ')}.` }));
+      }
+      await saveProfileRow(merged, uid);
+      res.writeHead(303, { Location: '/?welcome=1' });
       return res.end();
     }
 

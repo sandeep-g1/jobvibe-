@@ -13,7 +13,7 @@ import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score
 import { verifyJobs, STATUS } from './verify.js';
 import { writeReport, buildRows } from './report.js';
 import { sendDigest } from './email.js';
-import { loadProfileAsync } from './lib/profile.js';
+import { loadProfileAsync, missingProfile } from './lib/profile.js';
 import { userScope, inScope } from './lib/geo.js';
 import { aiRerank } from './lib/rerank.js';
 import { extractText } from './lib/resume.js';
@@ -39,6 +39,12 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
         if (t.ok) profile.cvText = t.text;
       }
     } catch { /* fall back to resumeText */ }
+  }
+  // An incomplete profile can only produce junk: no run, no report, no email.
+  const missing = missingProfile(profile, !!(profile.cvText || profile.resumeText));
+  if (missing.length) {
+    log(`${userId}: skipped, profile incomplete (missing ${missing.join(', ')})`);
+    return { userId, runId: null, reported: 0, emailed: false, emailReason: `profile incomplete: ${missing.join(', ')}` };
   }
   const runId = await startRun(userId);
 
