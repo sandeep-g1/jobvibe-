@@ -3,7 +3,11 @@
 // call fails soft so a missing/invalid key never crashes a request.
 import { cleanEnv } from '../db/driver.js';
 
-const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-flash-latest'];
+// 2.0-flash and 1.5-flash were retired (404). The alias tracks Google's current flash model.
+const MODELS = ['gemini-flash-latest', 'gemini-3.8-flash'];
+// Current flash models "think" before answering, and those tokens count against
+// maxOutputTokens. Without headroom a 1,024-token answer budget left ~40 tokens.
+const THINKING_HEADROOM = 8192;
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export function geminiConfigured() {
@@ -22,7 +26,7 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature,
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: maxTokens + THINKING_HEADROOM,
       ...(json ? { responseMimeType: 'application/json' } : {}),
     },
   };
@@ -46,6 +50,9 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
       }
       const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join('') || '';
       if (!text) { lastErr = 'empty response'; continue; }
+      // A cut-off answer is worse than none: callers would treat half a JSON
+      // object or half a cover letter as complete.
+      if (data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') { lastErr = 'answer was cut off (token limit)'; continue; }
       return { ok: true, text, model };
     } catch (err) {
       clearTimeout(timer);
