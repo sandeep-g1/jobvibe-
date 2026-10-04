@@ -2,6 +2,7 @@
 // report itself so the whole app reads as one product.
 import { dashboardStats, allRuns, resumeMeta } from '../db.js';
 import { missingProfile } from '../lib/profile.js';
+import { answerBankStatus } from '../lib/answers.js';
 import { FORM_CSS } from './settings.js';
 
 export const esc = (s) =>
@@ -112,6 +113,7 @@ function nav(active, extra = '') {
   ${tab('/reports', 'Reports', 'reports')}
   ${tab('/reports/latest', 'Latest Report', 'latest')}
   ${tab('/settings', 'Search Settings', 'settings')}
+  ${tab('/answers', 'Application Answers', 'answers')}
   <span class="nav-right">${extra}</span>
 </div>`;
 }
@@ -159,6 +161,7 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
   const recMap = Object.fromEntries(s.byRec.map((r) => [r.r, r.c]));
   const maxSrc = Math.max(1, ...s.bySource.map((r) => r.c));
   const missing = missingProfile(profile, !!(await resumeMeta(userId)));
+  const bank = answerBankStatus(profile);
   const titles = profile.jobTitles || [];
   const locs = profile.preferredLocations || [];
 
@@ -181,6 +184,12 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
     <p style="font-size:.9rem;color:#78350f;margin-bottom:12px">Still missing: <b>${esc(missing.join(', '))}</b>.
       Until this is done we can't search or match jobs for you.</p>
     <a class="btn" href="${missing.includes('your CV') ? '/onboarding' : '/onboarding/review'}">Finish setup</a>
+  </div>` : ''}
+  ${!missing.length && !bank.ready ? `
+  <div class="card" style="margin-bottom:16px;border-left:4px solid #0a66c2">
+    <h3>Application answers: ${bank.pct}% done</h3>
+    <p style="font-size:.88rem;color:#475467;margin-bottom:12px">Needed before the agent can apply for you: <b>${esc(bank.missing.slice(0, 4).join(', '))}${bank.missing.length > 4 ? ' and more' : ''}</b>.</p>
+    <a class="btn" href="/answers">Fill in application answers</a>
   </div>` : ''}
   <div class="grid g4" style="margin-bottom:16px">
     <div class="card"><div class="stat-n">${s.runs}</div><div class="stat-l">Reports generated</div>

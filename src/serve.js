@@ -26,6 +26,8 @@ import {
 } from './lib/auth.js';
 import { loginPage, signupPage } from './web/auth.js';
 import { onboardingPage, reviewPage } from './web/onboarding.js';
+import { answersPage, answersFromForm } from './web/answers.js';
+import { getAnswers } from './lib/answers.js';
 import { extractText } from './lib/resume.js';
 import { parseResume, geminiConfigured } from './lib/gemini.js';
 import Busboy from 'busboy';
@@ -364,6 +366,20 @@ export async function handler(req, res) {
     if (path === '/') {
       const p = await profile(uid);
       return send(res, 200, 'text/html; charset=utf-8', await dashboardPage(p, sourceStatus(p), uid, user));
+    }
+
+    if (path === '/answers' && req.method === 'GET') {
+      return send(res, 200, 'text/html; charset=utf-8',
+        answersPage(await profile(uid), { saved: url.searchParams.get('saved') === '1' }));
+    }
+    if (path === '/answers' && req.method === 'POST') {
+      const form = await readForm(req);
+      const prev = await profile(uid);
+      const merged = { ...prev, answers: answersFromForm(form, getAnswers(prev)), userId: uid };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, uid);
+      res.writeHead(303, { Location: '/answers?saved=1' });
+      return res.end();
     }
 
     if (path === '/settings' && req.method === 'GET') {
