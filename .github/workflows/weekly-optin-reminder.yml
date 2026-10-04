@@ -1,0 +1,30 @@
+name: Weekly opt-in reminder
+
+# While the daily service is paused, remind users who have not opted back in.
+# Only people still opted out are emailed, and nobody gets more than four
+# notices in total (the first "service paused" email counts as one), so this
+# goes quiet on its own. Mondays 04:30 UTC = 10:00 IST.
+on:
+  schedule:
+    - cron: '30 4 * * 1'
+  workflow_dispatch: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --omit=dev
+      - name: Send reminders
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          SITE_URL: https://jobvibe-green.vercel.app
+          PREVIEW_OUT: /tmp/notice-preview.html
+        run: node src/pause-and-notify.js --reminder --send

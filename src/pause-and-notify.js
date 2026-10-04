@@ -17,12 +17,17 @@ const SITE = process.env.SITE_URL || 'https://jobvibe-green.vercel.app';
 const argv = process.argv.slice(2);
 const PAUSE = argv.includes('--pause');
 const SEND = argv.includes('--send');
+// Weekly follow-up: only people still opted out, and never more than
+// MAX_NOTICES emails in total (the first notice counts as one).
+const REMINDER = argv.includes('--reminder');
+const MAX_NOTICES = 4;
 const validEmail = (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(e || ''));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export const SUBJECT = 'Your JobVibe daily job search is paused. Want it back?';
+const REMINDER_SUBJECT = 'Reminder: your JobVibe daily job search is still paused';
 
 export function noticeHtml(name, link) {
   return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0f2f5">
@@ -74,8 +79,10 @@ async function main() {
     .filter((u) => validEmail(u.email))
     .map((u) => {
       const p = profiles.get(u.id) || {};
-      return { id: u.id, email: u.email, name: p.name || u.display_name || '', token: p.optinToken };
-    });
+      return { id: u.id, email: u.email, name: p.name || u.display_name || '', token: p.optinToken,
+        active: p.scheduleActive === true, sent: p.optinSentCount || 0 };
+    })
+    .filter((r) => !REMINDER || (!r.active && r.sent < MAX_NOTICES));
 
   console.log(`\n  ${recipients.length} recipient(s):`);
   for (const r of recipients) console.log(`   - ${r.email}${r.name ? ` (${r.name})` : ''}${r.token ? '' : '  [no token yet: run with --pause]'}`);
@@ -99,11 +106,20 @@ async function main() {
     if (!r.token) { console.log(`   ✗ ${r.email}: no token (run with --pause first)`); continue; }
     const res = await sendEmail({
       to: [r.email],
-      subject: SUBJECT,
+      subject: REMINDER ? REMINDER_SUBJECT : SUBJECT,
       html: noticeHtml(r.name, `${SITE}/resume-service?t=${r.token}`),
     });
     console.log(res.sent ? `   ✓ ${r.email}` : `   ✗ ${r.email}: ${res.reason}`);
-    if (res.sent) ok++;
+    if (res.sent) {
+      ok++;
+      const p = profiles.get(r.id);
+      if (p) {
+        const next = { ...p, optinSentCount: (p.optinSentCount || 0) + 1,
+          optinLastSent: new Date().toISOString(), userId: r.id };
+        delete next._source; delete next._updatedAt;
+        await saveProfileRow(next, r.id);
+      }
+    }
     await new Promise((s) => setTimeout(s, 600)); // stay under Resend's rate limit
   }
   console.log(`\n  sent ${ok}/${recipients.length}\n`);
