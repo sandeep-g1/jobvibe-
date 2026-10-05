@@ -306,6 +306,22 @@ const TABLES = (pk, json) => `
     updated_at TEXT NOT NULL
   );
 
+  -- Jobs a user approved, as the apply worker works through them.
+  -- status: queued | running | needs_user | captcha | submitted | failed | skipped | dry_run
+  CREATE TABLE IF NOT EXISTS apply_queue (
+    id          ${pk},
+    user_id     TEXT NOT NULL,
+    match_id    INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'queued',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    reason      TEXT,
+    detail      TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(user_id, fingerprint)
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',

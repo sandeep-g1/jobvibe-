@@ -1,6 +1,6 @@
 // Dashboard ("face page") and the reports index. Same visual language as the
 // report itself so the whole app reads as one product.
-import { dashboardStats, allRuns, resumeMeta } from '../db.js';
+import { dashboardStats, allRuns, resumeMeta, queueForUser } from '../db.js';
 import { missingProfile } from '../lib/profile.js';
 import { answerBankStatus } from '../lib/answers.js';
 import { telegramConfigured } from '../lib/telegram.js';
@@ -163,6 +163,7 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
   const maxSrc = Math.max(1, ...s.bySource.map((r) => r.c));
   const missing = missingProfile(profile, !!(await resumeMeta(userId)));
   const bank = answerBankStatus(profile);
+  const apps = await queueForUser(userId, 10);
   const titles = profile.jobTitles || [];
   const locs = profile.preferredLocations || [];
 
@@ -272,6 +273,17 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
         : '<p class="muted">No jobs yet.</p>'}
     </div>
 
+    ${apps.length ? `
+    <div class="card">
+      <h3>Applications</h3>
+      ${apps.map((a) => {
+        const [label, cls] = APP_STATUS[a.status] || [a.status, 'chip-n'];
+        return `<div class="kv"><span>${esc(a.title)} <span class="muted">· ${esc(a.company)}</span>${a.reason && ['needs_user', 'failed', 'blocked', 'manual'].includes(a.status) ? `<br><span class="muted" style="font-size:.75rem">${esc(String(a.reason).slice(0, 90))}</span>` : ''}</span>
+          <span><span class="chip ${cls}" style="margin:0">${label}</span></span></div>`;
+      }).join('')}
+      <p class="muted" style="margin-top:10px">Approve jobs in Telegram; the worker applies and reports back there.</p>
+    </div>` : ''}
+
     <div class="card">
       <h3>Latest report</h3>
       ${latest ? `
@@ -293,6 +305,13 @@ ${DASH_SCRIPT}`;
 
   return layout({ title: `${esc(profile.name)} — Dashboard`, active: 'dash', body, navExtra: userChip(user) });
 }
+
+// Apply-queue statuses as the user sees them.
+const APP_STATUS = {
+  queued: ['Queued', 'chip'], running: ['Applying…', 'chip'], submitted: ['✓ Applied', 'chip-g'],
+  needs_user: ['Needs you', 'chip-r'], captcha: ['Finish it (CAPTCHA)', 'chip-r'], manual: ['Apply yourself', 'chip-n'],
+  blocked: ['Waiting on your answers', 'chip-r'], failed: ['Failed', 'chip-r'], skipped: ['Skipped', 'chip-n'], dry_run: ['Test run', 'chip-n'],
+};
 
 /** A skill in the bank, with a remove (−) button. */
 function skillChip(k) {

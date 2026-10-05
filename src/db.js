@@ -387,6 +387,57 @@ export async function topMatchesForRun(runId, limit = 5) {
   );
 }
 
+/* ---------------- apply queue ---------------- */
+
+/** Put every approved match that isn't queued yet into the apply queue. */
+export async function enqueueApproved() {
+  const d = await db();
+  const rows = await d.query(
+    `SELECT m.id, m.user_id, m.fingerprint FROM job_matches m
+       LEFT JOIN apply_queue q ON q.user_id = m.user_id AND q.fingerprint = m.fingerprint
+      WHERE m.decision = 'approved' AND q.id IS NULL`);
+  for (const r of rows) {
+    await d.run(insertIgnore('apply_queue', ['user_id', 'match_id', 'fingerprint', 'status', 'created_at', 'updated_at']),
+      [r.user_id, r.id, r.fingerprint, 'queued', now(), now()]);
+  }
+  return rows.length;
+}
+
+export async function nextQueued(limit = 1) {
+  const d = await db();
+  return d.query(`SELECT * FROM apply_queue WHERE status = 'queued' ORDER BY updated_at ASC LIMIT ?`, [limit]);
+}
+
+export async function updateQueueItem(id, { status, reason = null, detail = null, attempts }) {
+  const d = await db();
+  await d.run(
+    `UPDATE apply_queue SET status = ?, reason = ?, detail = ?, updated_at = ?${attempts != null ? ', attempts = ?' : ''} WHERE id = ?`,
+    attempts != null ? [status, reason, detail, now(), attempts, id] : [status, reason, detail, now(), id]);
+}
+
+/** After the user answers a question, put their waiting applications back in the queue. */
+export async function requeueNeedsUser(userId) {
+  const d = await db();
+  await d.run(`UPDATE apply_queue SET status = 'queued', updated_at = ? WHERE user_id = ? AND status = 'needs_user'`, [now(), userId]);
+}
+
+export async function submittedToday(userId) {
+  const d = await db();
+  const since = new Date(); since.setHours(0, 0, 0, 0);
+  const r = await d.one(`SELECT COUNT(*) AS c FROM apply_queue WHERE user_id = ? AND status = 'submitted' AND updated_at >= ?`,
+    [userId, since.toISOString()]);
+  return num(r?.c || 0);
+}
+
+/** Recent queue items with their jobs, for the dashboard. */
+export async function queueForUser(userId, limit = 12) {
+  const d = await db();
+  return d.query(
+    `SELECT q.id, q.status, q.reason, q.updated_at, j.title, j.company, j.apply_url, j.final_url
+       FROM apply_queue q JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? ORDER BY q.updated_at DESC LIMIT ?`, [userId, limit]);
+}
+
 /* ---------------- applications ---------------- */
 
 export async function toggleApplied(fingerprint, userId = 'local') {

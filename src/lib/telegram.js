@@ -12,7 +12,7 @@
 // only works from the chat linked to the match's owner.
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanEnv } from '../db/driver.js';
-import { allProfiles, saveProfileRow, setDecision, matchWithJob } from '../db.js';
+import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser } from '../db.js';
 
 const token = () => cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
 export const telegramConfigured = () => !!token();
@@ -52,6 +52,24 @@ export function send(chatId, html, { buttons, forceReply, placeholder } = {}) {
   if (buttons) p.reply_markup = { inline_keyboard: buttons };
   if (forceReply) p.reply_markup = { force_reply: true, input_field_placeholder: placeholder || 'Type your answer' };
   return tg('sendMessage', p);
+}
+
+/**
+ * Send a file: a screenshot ('photo') or a document such as a tailored CV.
+ * Telegram needs multipart for uploads, so this bypasses tg().
+ */
+export async function sendFile(chatId, { kind = 'document', buffer, filename, caption }) {
+  if (!telegramConfigured()) return { ok: false, description: 'TELEGRAM_BOT_TOKEN is not set' };
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  if (caption) { form.append('caption', caption.slice(0, 1000)); form.append('parse_mode', 'HTML'); }
+  form.append(kind, new Blob([buffer]), filename);
+  try {
+    const res = await fetch(`${apiBase()}/${kind === 'photo' ? 'sendPhoto' : 'sendDocument'}`, { method: 'POST', body: form });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, description: err.message };
+  }
 }
 
 /** Point Telegram at our webhook and register the command menu. */
@@ -105,6 +123,12 @@ const jobButtons = (m) => [
   [{ text: '✅ Approve', callback_data: `ap:${m.id}` }, { text: '❌ Skip', callback_data: `sk:${m.id}` }],
   ...(m.apply_url || m.final_url ? [[{ text: '🔗 View job', url: m.final_url || m.apply_url }]] : []),
 ];
+
+/** One job card with Approve / Skip / View buttons. */
+export function sendJobCard(chatId, m, { note } = {}) {
+  const why = m.why_text ? `\n<i>${h(String(m.why_text).split('. ')[0].slice(0, 160))}</i>` : '';
+  return send(chatId, `${note ? `${h(note)}\n\n` : ''}${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${why}`, { buttons: jobButtons(m) });
+}
 
 /**
  * Daily digest: a header, then one message per top match with buttons.
@@ -196,6 +220,7 @@ async function onMessage(msg) {
     custom.push({ q: pending.q, a: text, updatedAt: new Date().toISOString() });
     answers.custom = custom;
     await save(owner.userId, { ...p, answers, telegram: { ...p.telegram, pending: p.telegram.pending.filter((x) => x.id !== replyTo) } });
+    await requeueNeedsUser(owner.userId); // applications waiting on this can continue
     await send(chatId, `Saved ✓ I'll use <b>${h(text)}</b> for "${h(pending.q)}" from now on.`);
     return;
   }
