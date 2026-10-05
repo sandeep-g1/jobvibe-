@@ -26,6 +26,7 @@ import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
 import { atsOf } from './apply/forms.js';
+import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
 
 const require = createRequire(import.meta.url);
@@ -59,8 +60,8 @@ function takeLock() {
 async function loadJob(matchId) {
   const d = await db();
   const j = await d.one(
-    `SELECT m.id AS match_id, m.decision, j.title, j.company, j.country, j.jd_text, j.source, j.source_job_id,
-            j.apply_url, j.final_url, j.skills_required, c.ats_slug
+    `SELECT m.id AS match_id, m.decision, j.id, j.title, j.company, j.country, j.jd_text, j.source, j.source_job_id,
+            j.apply_url, j.final_url, j.skills_required, j.apply_route, c.ats_slug
        FROM job_matches m JOIN jobs j ON j.id = m.job_id LEFT JOIN companies c ON c.id = j.company_id
       WHERE m.id = ?`, [matchId]);
   if (!j) return null;
@@ -119,12 +120,21 @@ async function processItem(item, browser) {
   const cvName = `${safe(profile.name || 'Resume')}_CV.${ext}`;
   const cvText = (await extractText(original, cvRow.filename || cvName, '')).text || '';
 
-  const ats = atsOf(job.url);
+  // Where to apply: the job's own form, or the same role on the employer's own system
+  // (Himalayas / Cutshort / aggregator listings).
   const generic = process.env.WORKER_ALLOW_GENERIC === '1' && /^https?:\/\/(localhost|127\.0\.0\.1)/.test(job.url);
-  if (!SUPPORTED.has(ats) && !generic) {
-    await notify(profile, `📝 Please apply to ${label} yourself: this site (${h(ats || new URL(job.url).hostname)}) needs an account or its own flow, which I can't do yet.\n<a href="${h(job.url)}">Open the application</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
-    await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
-    return save('manual', `unsupported form: ${ats || 'unknown'}`);
+  let ats = atsOf(job.url);
+  if (!generic && !SUPPORTED.has(ats)) {
+    const route = await resolveApplyRoute(job);
+    if (route.route === 'auto' && SUPPORTED.has(route.ats)) {
+      job.url = route.url; ats = route.ats;
+      log(`${item.user_id}: ${job.company} → applying via ${route.via}`);
+    } else {
+      const why = route.route === 'auto' ? `its form is on ${route.ats}, which I can't fill yet` : route.reason;
+      await notify(profile, `✋ Please apply to ${label} yourself: ${h(why)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
+      await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
+      return save('manual', why);
+    }
   }
 
   log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);

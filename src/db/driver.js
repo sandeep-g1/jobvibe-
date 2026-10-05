@@ -370,6 +370,8 @@ const MIGRATIONS = [
   // Approve/skip from Telegram (or the report): what the apply agent acts on.
   'ALTER TABLE job_matches ADD COLUMN decision TEXT',
   'ALTER TABLE job_matches ADD COLUMN decided_at TEXT',
+  // Where the agent can apply for this job (JSON from lib/apply-route.js), cached.
+  'ALTER TABLE jobs ADD COLUMN apply_route TEXT',
 ];
 
 /* ------------------------------------------------------------------ */
