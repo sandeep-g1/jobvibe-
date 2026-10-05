@@ -69,7 +69,9 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       if (r.answer === 'CV_FILE') { plan.push({ f, value: cvPath, source: 'CV' }); continue; }
       if (r.essay) {
         if (!f.required && !/cover/i.test(f.label)) continue; // optional essays: skip
-        const d = await draftAnswer({ question: f.label, type: f.type === 'file' ? 'file' : f.type, job, profile, cvText });
+        let d = await draftAnswer({ question: f.label, type: f.type === 'file' ? 'file' : f.type, job, profile, cvText });
+        if (!d.ok) { await new Promise((res) => setTimeout(res, 6000)); d = await draftAnswer({ question: f.label, type: f.type === 'file' ? 'file' : f.type, job, profile, cvText }); }
+        if (!d.ok) log.push(`draft failed for "${f.label.slice(0, 60)}": ${d.error}`);
         if (!d.ok) { if (f.required) ask.push({ label: f.label, reason: `couldn't draft: ${d.error}` }); continue; }
         if (f.type === 'file') {
           const p = join(dir, 'Cover_Letter.txt'); writeFileSync(p, d.text);
@@ -91,12 +93,21 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     await page.waitForTimeout(800);
 
     // 3. Every required field must now hold a value.
-    const empty = await page.evaluate(() => [...document.querySelectorAll('input[required]:not([role="combobox"]), select[required], textarea[required]')]
-      .filter((el) => el.offsetParent !== null && el.type !== 'file')
-      .filter((el) => (el.type === 'checkbox' || el.type === 'radio')
-        ? !document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`)
-        : !String(el.value || '').trim())
-      .map((el) => el.name || el.id));
+    // Required is marked either way: the `required` attribute, or aria-required (Greenhouse).
+    const empty = await page.evaluate(() => [...document.querySelectorAll('input, select, textarea')]
+      .filter((el) => el.required || el.getAttribute('aria-required') === 'true')
+      .filter((el) => el.offsetParent !== null && el.type !== 'file' && el.type !== 'hidden')
+      .filter((el) => {
+        if (el.type === 'checkbox' || el.type === 'radio') return !document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`);
+        // Searchable dropdown: its text box stays empty; the chosen value shows next to it.
+        if (el.getAttribute('role') === 'combobox' || /select__input/.test(el.className)) {
+          // The whole dropdown ("…__control"), not the inner "input-container" around the text box.
+          const box = el.closest('[class*="control"]') || el.closest('[class*="value-container"]');
+          return !(box && box.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"], [class*="multiValue"]'));
+        }
+        return !String(el.value || '').trim();
+      })
+      .map((el) => el.name || el.id || el.getAttribute('aria-label') || 'unnamed field'));
     if (empty.length) return { status: 'failed', reason: `required fields left empty: ${empty.join(', ')}`, url, log };
 
     const screenshot = await page.screenshot({ fullPage: true });
