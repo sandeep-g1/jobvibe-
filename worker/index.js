@@ -5,6 +5,8 @@
 //   --dry-run   fill forms but never submit (testing)
 //   --headed    show the browser window
 //
+// Also: reads each user's job-hunt inbox every 10 minutes (worker/inbox.js).
+//
 // Per approved job: still approved? answer bank complete? under the daily cap?
 // supported form? → tailor the CV → fill → submit → Telegram receipt. Anything
 // it can't do alone goes back to the user on Telegram.
@@ -13,7 +15,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied,
+  initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv } from '../src/lib/secrets.js';
@@ -24,6 +26,7 @@ import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
 import { atsOf } from './apply/forms.js';
+import { checkInbox, sendApprovedReplies } from './inbox.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -161,6 +164,20 @@ async function processItem(item, browser) {
   return save('failed', r.reason, { filled }, attempts);
 }
 
+/* ---------------- inbox ---------------- */
+const INBOX_EVERY_MS = 10 * 60 * 1000;
+const lastInbox = new Map();
+async function inboxTick() {
+  const sent = await sendApprovedReplies();
+  if (sent) log(`sent ${sent} approved repl${sent === 1 ? 'y' : 'ies'}`);
+  for (const p of await allProfiles()) {
+    if (!p.data?.mailbox?.passEnc) continue;
+    if (!ONCE && Date.now() - (lastInbox.get(p.userId) || 0) < INBOX_EVERY_MS) continue;
+    lastInbox.set(p.userId, Date.now());
+    try { log(`${p.userId}: inbox ${await checkInbox(p.userId)}`); } catch (err) { log(`${p.userId}: inbox failed ${err.message}`); }
+  }
+}
+
 /* ---------------- loop ---------------- */
 async function unblockReady() {
   const d = await db();
@@ -197,8 +214,9 @@ async function main() {
   await loadSecretsIntoEnv();
   const browser = await chromium.launch({ headless: !HEADED });
   log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}`);
-  if (ONCE) { await tick(browser); await browser.close(); return; }
+  if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
   for (;;) {
+    try { await inboxTick(); } catch (err) { log(`inbox tick failed: ${err.message}`); }
     try { await tick(browser); } catch (err) { log(`tick failed: ${err.message}`); }
     // 60-120 s between applications so employers aren't hit in bursts.
     await new Promise((r) => setTimeout(r, 60000 + Math.floor(Math.random() * 60000)));

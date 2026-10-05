@@ -13,7 +13,7 @@ import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { settingsPage } from './web/settings.js';
 import { emailConfigured } from './email.js';
-import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED } from './lib/secrets.js';
+import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED, encrypt } from './lib/secrets.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
 import { loadProfileAsync, FIELDS, normaliseProfile, missingProfile } from './lib/profile.js';
@@ -416,8 +416,33 @@ export async function handler(req, res) {
     }
 
     if (path === '/answers' && req.method === 'GET') {
+      const mbMsg = { saved: 'Inbox saved. The worker checks it within 10 minutes and confirms on Telegram.', removed: 'Inbox disconnected.' }[url.searchParams.get('mb')]
+        || (url.searchParams.get('mberr') ? url.searchParams.get('mberr') : null);
       return send(res, 200, 'text/html; charset=utf-8',
-        answersPage(await profile(uid), { saved: url.searchParams.get('saved') === '1' }));
+        answersPage(await profile(uid), { saved: url.searchParams.get('saved') === '1', mailboxMsg: mbMsg }));
+    }
+    if (path === '/answers/mailbox' && req.method === 'POST') {
+      const form = await readForm(req);
+      const email = String(form.mb_email || '').trim().toLowerCase();
+      const pass = String(form.mb_pass || '').replace(/\s+/g, '');
+      const bad = !/^[^@\s]+@(gmail|googlemail)\.com$/.test(email) ? 'Please enter a Gmail address (…@gmail.com).'
+        : !/^[a-z]{16}$/i.test(pass) ? 'The app password is the 16-letter code from myaccount.google.com/apppasswords, not your Gmail password.' : null;
+      if (bad) { res.writeHead(303, { Location: `/answers?mberr=${encodeURIComponent(bad)}` }); return res.end(); }
+      const prev = await profile(uid);
+      const keepUid = prev.mailbox?.email === email ? prev.mailbox.lastUid : 0;
+      const merged = { ...prev, mailbox: { email, passEnc: encrypt(pass), host: 'imap.gmail.com', status: 'pending', lastUid: keepUid || 0 }, userId: uid };
+      delete merged._source; delete merged._updatedAt;
+      await saveProfileRow(merged, uid);
+      res.writeHead(303, { Location: '/answers?mb=saved' });
+      return res.end();
+    }
+    if (path === '/answers/mailbox/disconnect' && req.method === 'POST') {
+      const prev = await profile(uid);
+      const { mailbox, ...rest } = prev; // eslint-disable-line no-unused-vars
+      delete rest._source; delete rest._updatedAt;
+      await saveProfileRow({ ...rest, userId: uid }, uid);
+      res.writeHead(303, { Location: '/answers?mb=removed' });
+      return res.end();
     }
     if (path === '/answers' && req.method === 'POST') {
       const form = await readForm(req);

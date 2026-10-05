@@ -433,9 +433,52 @@ export async function submittedToday(userId) {
 export async function queueForUser(userId, limit = 12) {
   const d = await db();
   return d.query(
-    `SELECT q.id, q.status, q.reason, q.updated_at, j.title, j.company, j.apply_url, j.final_url
+    `SELECT q.id, q.status, q.reason, q.detail, q.updated_at, j.title, j.company, j.apply_url, j.final_url
        FROM apply_queue q JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
       WHERE q.user_id = ? ORDER BY q.updated_at DESC LIMIT ?`, [userId, limit]);
+}
+
+/* ---------------- inbox ---------------- */
+
+/** Store one classified email. Returns the new row id, or null if already stored. */
+export async function insertInboxEvent(e) {
+  const d = await db();
+  const exists = await d.one('SELECT id FROM inbox_events WHERE user_id = ? AND uid = ?', [e.user_id, String(e.uid)]);
+  if (exists) return null;
+  return num(await d.insertReturningId(
+    `INSERT INTO inbox_events (user_id, uid, queue_id, company, from_addr, subject, category, summary, draft_reply,
+       reply_status, message_id, received_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [e.user_id, String(e.uid), e.queue_id ?? null, e.company ?? null, e.from_addr ?? null, e.subject ?? null, e.category,
+     e.summary ?? null, e.draft_reply ?? null, e.draft_reply ? 'drafted' : 'none', e.message_id ?? null,
+     e.received_at ?? null, now()]));
+}
+
+export async function inboxEvent(id) {
+  const d = await db();
+  return d.one('SELECT * FROM inbox_events WHERE id = ?', [id]);
+}
+
+/** Owner-scoped reply decision from Telegram ('approved' to send, 'dismissed'). */
+export async function setReplyStatus(id, userId, status) {
+  const d = await db();
+  const row = await d.one('SELECT id FROM inbox_events WHERE id = ? AND user_id = ?', [id, userId]);
+  if (!row) return false;
+  await d.run('UPDATE inbox_events SET reply_status = ? WHERE id = ?', [status, id]);
+  return true;
+}
+
+export async function repliesToSend() {
+  const d = await db();
+  return d.query(`SELECT * FROM inbox_events WHERE reply_status = 'approved' ORDER BY id`);
+}
+
+/** Submitted/active applications for a user, to match incoming email against. */
+export async function applicationsForMatching(userId) {
+  const d = await db();
+  return d.query(
+    `SELECT q.id, q.status, q.detail, j.company, j.title FROM apply_queue q
+       JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? AND q.status IN ('submitted', 'captcha', 'manual', 'needs_user')`, [userId]);
 }
 
 /* ---------------- applications ---------------- */

@@ -278,8 +278,9 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
       <h3>Applications</h3>
       ${apps.map((a) => {
         const [label, cls] = APP_STATUS[a.status] || [a.status, 'chip-n'];
+        const mail = EMAIL_STATUS[(JSON.parse(a.detail || '{}')).lastEmail];
         return `<div class="kv"><span>${esc(a.title)} <span class="muted">· ${esc(a.company)}</span>${a.reason && ['needs_user', 'failed', 'blocked', 'manual'].includes(a.status) ? `<br><span class="muted" style="font-size:.75rem">${esc(String(a.reason).slice(0, 90))}</span>` : ''}</span>
-          <span><span class="chip ${cls}" style="margin:0">${label}</span></span></div>`;
+          <span>${mail ? `<span class="chip ${mail[1]}" style="margin:0 4px 0 0">${mail[0]}</span>` : ''}<span class="chip ${cls}" style="margin:0">${label}</span></span></div>`;
       }).join('')}
       <p class="muted" style="margin-top:10px">Approve jobs in Telegram; the worker applies and reports back there.</p>
     </div>` : ''}
@@ -305,6 +306,12 @@ ${DASH_SCRIPT}`;
 
   return layout({ title: `${esc(profile.name)} — Dashboard`, active: 'dash', body, navExtra: userChip(user) });
 }
+
+// What the latest employer email said (from the inbox agent).
+const EMAIL_STATUS = {
+  interview: ['📅 Interview', 'chip-g'], assessment: ['📝 Assessment', 'chip-g'], offer: ['🎉 Offer', 'chip-g'],
+  info_request: ['📎 Info requested', 'chip-r'], rejection: ['Not selected', 'chip-n'], received: ['Received', 'chip-n'],
+};
 
 // Apply-queue statuses as the user sees them.
 const APP_STATUS = {

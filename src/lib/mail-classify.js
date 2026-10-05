@@ -1,0 +1,104 @@
+// Classify an email from a job-hunt inbox and, where useful, draft a reply.
+//
+// Cheap pre-filter first (keywords / a company the user applied to), so
+// newsletters and personal mail never reach the model. Drafts only state
+// facts the user has stored; anything needing a real decision (salary,
+// dates, documents we don't hold) is left for the user.
+import { generate, geminiConfigured } from './gemini.js';
+import { humanize } from './tailor.js';
+
+export const CATEGORIES = ['received', 'rejection', 'interview', 'assessment', 'info_request', 'offer', 'other'];
+const JOBBY = /\b(application|applied|interview|position|role|candidate|candidacy|recruit\w*|hiring|talent acquisition|assessment|assignment|test link|offer|shortlisted|next steps?|your (cv|resume)|job|documents?|certificates?|payslips?|salary slips?|relieving letter|experience letter|background (check|verification)|onboarding|joining|before we proceed|notice period|ctc)\b/i;
+
+const lc = (s) => String(s || '').toLowerCase();
+
+/** Which of the user's applications this email is about (by company name). */
+export function matchApplication(mail, applications) {
+  const hay = lc(`${mail.from} ${mail.subject} ${String(mail.text).slice(0, 3000)}`);
+  const sender = lc(mail.from).replace(/[^a-z0-9@.]/g, '');
+  const STOP = new Set(['and', 'the', 'for', 'of', 'in', 'with', 'senior', 'junior', 'sr', 'jr', 'lead', 'associate', 'ii', 'iii']);
+  let best = null;
+  for (const a of applications) {
+    const c = lc(a.company).replace(/\b(inc|ltd|llc|pvt|private|limited|group|technologies|corp(oration)?)\b\.?/g, '').trim();
+    if (c.length < 3) continue;
+    // Name in the text, or squashed into the sender's address ("Practice Co" -> hr@practiceco.com).
+    const squashed = c.replace(/[^a-z0-9]/g, '');
+    if (!(hay.includes(c) || (squashed.length >= 4 && sender.includes(squashed)))) continue;
+    // Several applications at one company: prefer the one whose title the email mentions,
+    // then a submitted one over one still pending.
+    const words = lc(a.title).split(/[^a-z0-9+#]+/).filter((w) => w.length > 2 && !STOP.has(w));
+    const titleHits = words.filter((w) => hay.includes(w)).length / Math.max(1, words.length);
+    const score = c.length + titleHits * 50 + (a.status === 'submitted' ? 5 : 0);
+    if (!best || score > best.score) best = { app: a, score };
+  }
+  return best ? best.app : null;
+}
+
+export function looksJobRelated(mail, applications) {
+  return !!matchApplication(mail, applications) || JOBBY.test(`${mail.subject} ${String(mail.text).slice(0, 1500)}`);
+}
+
+function parse(text) {
+  try { return JSON.parse(text); } catch { /* salvage */ }
+  const m = String(text).match(/\{[\s\S]*\}/);
+  try { return m ? JSON.parse(m[0]) : null; } catch { return null; }
+}
+
+/**
+ * @param {{from:string, subject:string, text:string}} mail
+ * @param {{ profile:object, application?:object }} ctx
+ * @returns {Promise<{ ok:boolean, category?:string, company?:string, summary?:string, draftReply?:string|null, error?:string }>}
+ */
+export async function classifyEmail(mail, { profile = {}, application = null } = {}) {
+  if (!geminiConfigured()) return { ok: false, error: 'GEMINI_API_KEY is not set' };
+  const a = profile.answers || {};
+  const facts = [
+    `Name: ${profile.name || ''}`,
+    a.noticePeriodDays !== '' && a.noticePeriodDays != null ? `Notice period: ${a.noticePeriodDays} days` : '',
+    a.phone ? `Phone: ${a.phone}` : '',
+    a.linkedin ? `LinkedIn: ${a.linkedin}` : '',
+  ].filter(Boolean).join('\n');
+
+  const prompt = `You read emails in a job seeker's inbox. Classify this one and, only if a reply is clearly expected, draft it.
+
+Categories:
+- received: automatic "we got your application"
+- rejection: not moving forward
+- interview: invitation to interview / schedule a call
+- assessment: test, assignment, coding challenge, questionnaire
+- info_request: asks the candidate for information or documents
+- offer: job offer
+- other: job-related but none of the above, or not about a job application
+
+Draft rules (draft_reply):
+- Only for interview, assessment, info_request or offer. Otherwise null.
+- Short, polite, plain, from the candidate in first person, signed with their name.
+- Use ONLY these facts:\n${facts}
+- Never invent availability, dates, salary figures, or documents. For an interview, thank them and ask them to share
+  slots so the candidate can confirm. For an offer, thank them and say the candidate will review and respond shortly.
+  If the email asks for something not in the facts, set draft_reply to null and say what's needed in "needs".
+
+${application ? `This is probably about the application for: ${application.title} at ${application.company}.` : ''}
+
+EMAIL
+From: ${mail.from}
+Subject: ${mail.subject}
+${String(mail.text || '').slice(0, 5000)}
+
+Return ONLY JSON: {"category":"...","company":"employer name or null","summary":"one or two plain sentences, what they want and by when","draft_reply":"..." or null,"needs":"what the candidate must provide, or null"}`;
+
+  const r = await generate(prompt, { json: true, temperature: 0.2, maxTokens: 1200 });
+  if (!r.ok) return { ok: false, error: r.error };
+  const out = parse(r.text);
+  if (!out || !CATEGORIES.includes(out.category)) return { ok: false, error: 'unusable classification' };
+  const draft = out.draft_reply && ['interview', 'assessment', 'info_request', 'offer'].includes(out.category)
+    ? humanize(String(out.draft_reply).trim(), { allowEmDash: false }) : null;
+  return {
+    ok: true,
+    category: out.category,
+    company: out.company || application?.company || null,
+    summary: String(out.summary || '').slice(0, 400),
+    draftReply: draft,
+    needs: out.needs || null,
+  };
+}

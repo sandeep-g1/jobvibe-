@@ -322,6 +322,27 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, fingerprint)
   );
 
+  -- Job-related emails found in a user's job-hunt inbox.
+  -- category: received | rejection | interview | assessment | info_request | offer | other
+  -- reply_status: none | drafted | approved | sent | dismissed | failed
+  CREATE TABLE IF NOT EXISTS inbox_events (
+    id           ${pk},
+    user_id      TEXT NOT NULL,
+    uid          TEXT NOT NULL,
+    queue_id     INTEGER,
+    company      TEXT,
+    from_addr    TEXT,
+    subject      TEXT,
+    category     TEXT NOT NULL,
+    summary      TEXT,
+    draft_reply  TEXT,
+    reply_status TEXT NOT NULL DEFAULT 'none',
+    message_id   TEXT,
+    received_at  TEXT,
+    created_at   TEXT NOT NULL,
+    UNIQUE(user_id, uid)
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',

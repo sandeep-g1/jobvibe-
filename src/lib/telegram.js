@@ -12,7 +12,7 @@
 // only works from the chat linked to the match's owner.
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanEnv } from '../db/driver.js';
-import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser } from '../db.js';
+import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus } from '../db.js';
 
 const token = () => cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
 export const telegramConfigured = () => !!token();
@@ -244,6 +244,19 @@ async function onCallback(cb) {
   const [kind, idStr] = String(cb.data || '').split(':');
   const id = Number(idStr);
   const answer = (text) => tg('answerCallbackQuery', { callback_query_id: cb.id, text });
+
+  // Reply buttons on inbox alerts: rs = send the drafted reply, rd = user handles it.
+  if (kind === 'rs' || kind === 'rd') {
+    const ev = Number.isInteger(id) ? await inboxEvent(id) : null;
+    if (!ev) return answer('That email is no longer available.');
+    const owner = (await allProfiles()).find((p) => p.userId === ev.user_id);
+    if (!owner || owner.data?.telegram?.chatId !== chatId || cb.from?.id !== chatId) return answer('This button belongs to another account.');
+    if (ev.reply_status === 'sent') return answer('Already sent.');
+    await setReplyStatus(ev.id, ev.user_id, kind === 'rs' ? 'approved' : 'dismissed');
+    await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+    await send(chatId, kind === 'rs' ? `✉️ Sending your reply to ${h(ev.from_addr)} in the next minute.` : '✋ Okay, you\'ll reply yourself.');
+    return answer(kind === 'rs' ? 'Queued to send' : 'Noted');
+  }
 
   const m = Number.isInteger(id) ? await matchWithJob(id) : null;
   if (!m) return answer('That job is no longer available.');

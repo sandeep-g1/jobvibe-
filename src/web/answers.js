@@ -37,7 +37,37 @@ const inp = (name, value, extra = '') => `<input type="text" name="${name}" valu
 const fld = (label, control, help = '') =>
   `<div class="fld"><label>${esc(label)}</label>${control}${help ? `<span class="help">${esc(help)}</span>` : ''}</div>`;
 
-export function answersPage(profile, { saved = false } = {}) {
+/** Connect a dedicated job-hunt Gmail (app password) so the agent can read employer replies. */
+function mailboxCard(mb, msg) {
+  const status = !mb?.email ? ''
+    : mb.status === 'ok' ? `<span class="pill" style="background:#dcfce7;color:#166534">connected</span>${mb.lastCheck ? ` <span class="muted" style="font-size:.78rem">checked ${esc(new Date(mb.lastCheck).toLocaleString('en-IN'))}</span>` : ''}`
+      : mb.status === 'error' ? `<span class="pill" style="background:#fee2e2;color:#991b1b">${esc(mb.error || 'error')}</span>`
+        : '<span class="pill">saved: checked within 10 minutes once the worker is running</span>';
+  return `
+  <div class="card" style="margin-bottom:16px;border-left:4px solid #0a66c2">
+    <h3>Job-hunt inbox ${status}</h3>
+    ${msg ? `<div class="saved" style="margin:6px 0 10px">${esc(msg)}</div>` : ''}
+    ${mb?.email ? `
+      <p style="font-size:.88rem">Watching <b>${esc(mb.email)}</b> for replies from employers. Interview invites, assessments,
+        document requests and offers come to you on Telegram with a drafted reply; nothing is sent until you tap Send.</p>
+      <form method="POST" action="/answers/mailbox/disconnect" style="margin-top:10px"><button class="btn btn-ghost" type="submit">Disconnect inbox</button></form>`
+    : `
+      <p class="muted" style="margin-bottom:10px">Use a <b>separate Gmail just for job hunting</b> and put it as your application email above.
+        Then the agent can spot interview invites and requests and draft replies for you.</p>
+      <ol style="font-size:.85rem;color:#475467;margin:0 0 12px 18px;line-height:1.7">
+        <li>Sign in to that Gmail and turn on <b>2-Step Verification</b> at <a href="https://myaccount.google.com/security" target="_blank" rel="noopener">myaccount.google.com/security</a>.</li>
+        <li>Open <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a>, name it <b>JobVibe</b>, and copy the 16-letter code.</li>
+        <li>Paste the Gmail address and that code below. (Not your normal Gmail password.)</li>
+      </ol>
+      <form method="POST" action="/answers/mailbox" class="grid g2" autocomplete="off">
+        <div class="fld"><label>Job-hunt Gmail address</label><input type="text" name="mb_email" placeholder="you.jobhunt@gmail.com" autocomplete="off"></div>
+        <div class="fld"><label>Gmail app password (16 letters)</label><input type="text" class="secret" name="mb_pass" autocomplete="off" data-lpignore="true" data-1p-ignore></div>
+        <div><button class="btn" type="submit">Connect inbox</button></div>
+      </form>`}
+  </div>`;
+}
+
+export function answersPage(profile, { saved = false, mailboxMsg = null } = {}) {
   const a = getAnswers(profile);
   const st = answerBankStatus(profile);
   const targets = new Set(targetCountries(profile));
@@ -75,6 +105,7 @@ export function answersPage(profile, { saved = false } = {}) {
   ${saved ? '<div class="saved">Saved.</div>' : ''}
   ${st.missing.length ? `<div class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b;background:#fffbeb">
     <h3 style="color:#92400e">Still needed</h3><p style="font-size:.88rem;color:#78350f">${esc(st.missing.join(' · '))}</p></div>` : ''}
+  ${mailboxCard(profile.mailbox, mailboxMsg)}
   <form method="POST" action="/answers">
     <div class="grid g2">
       <div class="card"><h3>Contact &amp; links</h3>
