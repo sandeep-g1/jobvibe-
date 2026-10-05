@@ -159,6 +159,12 @@ async function processItem(item, browser) {
   const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
+  if (r.status === 'closed') {
+    // Taken down: no retry, and the job leaves the pool so it isn't offered again.
+    await (await db()).run(`UPDATE jobs SET link_status = 'DEAD', link_checked_at = ? WHERE id = ?`, [new Date().toISOString(), job.id]);
+    await notify(profile, `🔒 ${label} is no longer open, so there's nothing to apply to.`);
+    return save('closed', r.reason);
+  }
   if (r.status === 'ineligible') {
     const why = r.reasons.map((x) => `• ${x.label} → <b>${h(x.answer)}</b>`).join('\n');
     if (telegramConfigured() && profile.telegram?.chatId) {

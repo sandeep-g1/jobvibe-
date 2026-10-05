@@ -1,5 +1,6 @@
 // Apply to one job: read the form, answer it, fill it, then submit (or stop,
 // in dry-run). Outcomes:
+//   closed      the employer took the job down
 //   ineligible  a truthful answer rules the user out (work rights, location, language)
 //   needs_user  a required question only the user can answer: nothing filled
 //   dry_run     filled and checked, not submitted (testing)
@@ -20,14 +21,19 @@ const CONFIRM = /thank(s| you) for (applying|your (application|interest|submissi
 // Questions that decide whether the user can take the job at all. A truthful "No" to one
 // of these is an automatic rejection, so the agent stops instead of applying.
 const ELIGIBILITY = /(authori[sz]ed|eligible|entitled|permitted|right|allowed) to work|legally (able to )?work|work (permit|authori[sz]ation)|fluen(t|cy)|proficien(t|cy)|native speaker|(speak|write|read)s? .{0,30}\b(english|german|dutch|french|spanish|polish|arabic|italian|portuguese)\b|(based|located|reside|residing|living|live) (in|within)|on-?site|in the office|commut|security clearance/i;
+// "Do you require a visa / work permit / sponsorship?": here "No" is the good answer.
+// ("Authorised to work here without sponsorship?" is not one of these: "No" there rules you out.)
+const needsSupport = (label) => !/\bwithout\b.{0,40}\b(sponsor|visa|permit|support)/i.test(label)
+  && /sponsor|\b(require|need)s?\b.{0,80}\b(visa|permit|support|right to work|authori[sz]ation)|\b(visa|permit|support)\b.{0,40}\b(required|needed)\b/i.test(label);
 const isNo = (v) => v === false || /^(no|n|false)\b|^i (am not|do not|don't|will not|can't|cannot)\b|^not (authori|eligible|willing|able|located|based|fluent)/i.test(String(v ?? '').trim());
-function blocksEligibility(f, r) {
-  if (!ELIGIBILITY.test(f.label) || /sponsor/i.test(f.label) || /^(voluntary|no marketing)/.test(r.source || '')) return false;
+export function blocksEligibility(f, r) {
+  if (!ELIGIBILITY.test(f.label) || needsSupport(f.label) || /^(voluntary|no marketing)/.test(r.source || '')) return false;
   // A lone attestation checkbox ("I confirm I'm based in the EU") only matters when required.
   if (f.type === 'checkbox' && (f.options?.length || 0) <= 1) return r.answer === false && f.required;
   return isNo(r.answer);
 }
-const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
+const CLOSED = /job (you requested )?(was )?not found|(job|position|posting|role) (is )?no longer (available|open|active|accepting)|no longer accepting applications|(job|position|posting) has (been )?(closed|filled|expired)|this (job|position) (is )?closed|page (you('re| are) looking for )?(could not be|was not|wasn't) found/i;
+const CHALLENGE ='iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
 
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
 
@@ -88,13 +94,20 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
   let clicked = false;
   try {
     const fields = await openForm(page, url);
-    if (!fields.length) return { status: 'failed', reason: 'no application form found on the page', url };
+    if (!fields.length) {
+      const text = await page.evaluate(() => document.body.innerText).catch(() => '');
+      if (CLOSED.test(text)) return { status: 'closed', reason: 'the employer has closed this job', url };
+      return { status: 'failed', reason: 'no application form found on the page', url };
+    }
 
     // 1. Decide every answer before touching the page.
     const plan = [];
     const ask = [];
     const noGo = [];
     for (const f of fields) {
+      // A lone checkbox whose "label" swallowed half the form ("First Name* Last Name* Email*…"):
+      // its own text is the real question.
+      if (f.type === 'checkbox' && f.options?.length === 1 && (f.label.length > 200 || (f.label.match(/\*/g) || []).length >= 3)) f.label = f.options[0];
       // Searchable dropdowns: read the real choices so answers pick one of them.
       if (f.type === 'combobox' && !f.options?.length) f.options = await comboOptions(page, f);
       // A 100-item list is a page of a searchable directory (schools, cities): answer with the

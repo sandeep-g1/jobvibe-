@@ -201,7 +201,14 @@ function salaryText(cc, val) {
   const v = String(val || '').trim();
   if (!v) return '';
   if (/[a-z₹$€£]/i.test(v)) return v; // user already wrote units
-  return cc === 'IN' ? `${v} LPA` : `${CURRENCY[cc]} ${Number(v).toLocaleString('en-US')}${cc === 'AE' ? ' per month' : ' per year'}`;
+  return cc === 'IN' ? `${lpa(v)} LPA` : `${CURRENCY[cc]} ${Number(v).toLocaleString('en-US')}${cc === 'AE' ? ' per month' : ' per year'}`;
+}
+
+/** An Indian amount in lakhs: "12" stays 12; a rupee figure ("1000000", "10,00,000") becomes 10. */
+function lpa(val) {
+  const n = Number(String(val).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return String(val);
+  return n >= 1000 ? String(+(n / 100000).toFixed(2)) : String(n);
 }
 
 function nameParts(full = '') {
@@ -279,7 +286,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   // Only a short label is the email field ("you'll write to clients via email…" is an essay).
   if (/e-?mail/.test(t) && t.length <= 45 && !/confirm|marketing|newsletter/.test(t)) return text(a.email, 'email', 'email');
   if (/phone|mobile|contact number/.test(t)) return text(a.phone, 'phone', 'phone');
-  if (/linkedin/.test(t)) return text(a.linkedin, 'linkedin', 'LinkedIn URL');
+  if (/linkedin/.test(t)) return text(String(a.linkedin || '').replace(/[?#].*$/, ''), 'linkedin', 'LinkedIn URL'); // no tracking tail (?isSelf…)
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
 
   // ---- legal restrictions: always the user's call ----
@@ -295,6 +302,11 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (!isChoice) return { answer: 'Not applicable', source: 'work status' };
     const na = opts.find((o) => /not applicable|n\/a|none|no visa|citizen|not on a visa/i.test(o));
     return na ? { answer: na, source: 'work status' } : { needsHuman: true, reason: 'visa type options' };
+  }
+  // "Authorised to work here without (requiring) sponsorship?": yes only if no support is needed, now or later.
+  if (/\bwithout\b.{0,40}\b(sponsor|visa|support)/.test(t)) {
+    if (!w.status) return { needsHuman: true, reason: `work status in ${COUNTRY_NAMES[cc]} not set` };
+    return yesno(['citizen', 'permanent', 'visa_no_sponsor'].includes(w.status), `work status in ${COUNTRY_NAMES[cc]}`);
   }
   if (/(require|need).{0,40}sponsor|sponsorship|visa.{0,30}(support|transfer|sponsor)/.test(t)) {
     if (!w.status) return { needsHuman: true, reason: `work status in ${COUNTRY_NAMES[cc]} not set` };
@@ -352,8 +364,15 @@ export function answerQuestion(q, profile, ctx = {}) {
     return text(COUNTRY_NAMES[ctx.country || 'IN'], "the job's country", 'country');
   }
   const named = (label.match(/[A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?/g) || []).map((w2) => resolveChoice(w2)).filter((r) => r && r.city);
-  if (named.length && /(currently )?(based|located|living|residing) in/.test(t)) {
-    return yesno(named.some((r) => r.city === home.city), 'your city');
+  if (named.length && /(based|located|living|residing|staying) (in|out of|at)\b|currently in\b/.test(t)) {
+    const here = named.some((r) => r.city === home.city);
+    // "Based in Bangalore / Willing to relocate / Need fully remote": pick the one that's true.
+    if (isChoice && !opts.some((o) => YES.test(lc(o)))) {
+      const o = here ? opts.find((x) => /\b(based|live|living|located|resid)/i.test(x) && !/relocat|remote/i.test(x))
+        : a.relocate === 'yes' ? opts.find((x) => /relocat/i.test(x) && !/can.?t|not|unable/i.test(x)) : null;
+      return o ? { answer: o, source: here ? 'your city' : 'willing to relocate' } : { needsHuman: true, reason: 'where you are based' };
+    }
+    return yesno(here, 'your city');
   }
   if (named.length && /work(ing)? (from|in|at|out of)|office|open to|relocat|commute|on-?site in|comfortable (with )?(working|being based)/.test(t)) {
     const scope = userScope(profile);
@@ -363,13 +382,25 @@ export function answerQuestion(q, profile, ctx = {}) {
     return { needsHuman: true, reason: 'relocation not set' };
   }
 
+  // "Location preference: Bengaluru / Hyderabad / Other": the user's own city, else one of their chosen ones.
+  if (isChoice && /location preference|preferred (work |job )?location|(which|what) (of our )?(location|office|city)/.test(t)) {
+    const scope = userScope(profile);
+    const cities = opts.map((o) => ({ o, r: resolveChoice(o) })).filter((x) => x.r?.city);
+    const pick = cities.find((x) => x.r.city === home.city) || cities.find((x) => scope.cities.get(x.r.city) === x.r.cc);
+    if (pick) return { answer: pick.o, source: pick.r.city === home.city ? 'your city' : 'your chosen locations' };
+  }
+
   // ---- notice, start date, relocation ----
   if (/notice period|how soon.{0,20}join|joining time|^availability\b|available to start|when (can|could) you (start|join)/.test(t)) {
     if (a.noticePeriodDays === '') return { needsHuman: true, reason: 'notice period not set' };
-    return isChoice ? text(Number(a.noticePeriodDays), 'notice period') : { answer: noticeText(a.noticePeriodDays), source: 'notice period' };
+    if (isChoice) return text(Number(a.noticePeriodDays), 'notice period');
+    // "Notice period (in days)": a number, not "Immediately".
+    if (/in days|\(days\)|number of days|no\.? of days|how many days/.test(t)) return { answer: String(Number(a.noticePeriodDays)), source: 'notice period' };
+    return { answer: noticeText(a.noticePeriodDays), source: 'notice period' };
   }
   if (/serving (your )?notice|currently on notice/.test(t)) return yesno(!!a.servingNotice, 'serving notice');
-  if (/(earliest|available|availability).{0,25}(start|join)|start date|when can you start/.test(t)) {
+  // (Not "Start date month/year": that's a work-history or education date.)
+  if (/(earliest|available|availability).{0,25}(start|join)|start date|when can you start/.test(t) && !/\b(month|year)\b/.test(t)) {
     if (a.noticePeriodDays === '' && !a.lastWorkingDay) return { needsHuman: true, reason: 'notice period not set' };
     return isChoice ? text(Number(a.noticePeriodDays), 'notice period') : { answer: startDate(a), source: 'notice period' };
   }
@@ -387,7 +418,8 @@ export function answerQuestion(q, profile, ctx = {}) {
   }
   if (/(current|present|last drawn).{0,20}(ctc|salary|compensation|package)/.test(t)) {
     if (cc !== 'IN') return { needsHuman: true, reason: 'current salary outside India (often illegal to ask; your call)' };
-    return a.currentCtcLpa === '' ? { needsHuman: true, reason: 'current CTC not set' } : text(`${a.currentCtcLpa} LPA`, 'current CTC');
+    return a.currentCtcLpa === '' ? { needsHuman: true, reason: 'current CTC not set' }
+      : text(/[a-z₹]/i.test(String(a.currentCtcLpa)) ? a.currentCtcLpa : `${lpa(a.currentCtcLpa)} LPA`, 'current CTC');
   }
 
   // ---- current job, education, misc facts ----
@@ -406,9 +438,9 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/driv(ing|er'?s) licen[cs]e/.test(t)) return a.drivingLicense === '' ? { needsHuman: true, reason: 'driving licence not set' } : yesno(a.drivingLicense === 'yes', 'driving licence');
   if (/languages? (do you speak|spoken|known)|which languages/.test(t)) return text(a.languages, 'languages', 'languages');
   if (/(18|eighteen) years|legal age|age of majority/.test(t)) return yesno(true, 'adult');
-  if (/how did you (hear|find|learn)|source of (application|referral)|where did you (hear|see|find)/.test(t)) {
+  if (/how did you (hear|find|learn|get to know|come to know|come across)|source of (application|referral)|where did you (hear|see|find)/.test(t)) {
     if (!isChoice) return { answer: 'Company careers website', source: 'default' };
-    const o = opts.find((x) => /company (career|website)|careers? (page|site)|corporate website|website/i.test(x) && !/college|university|campus|event|fair/i.test(x))
+    const o = opts.find((x) => /company (career|website)|careers? (page|site)|corporate website|website|job site/i.test(x) && !/college|university|campus|event|fair/i.test(x))
       || opts.find((x) => /job board|online|linkedin/i.test(x)) || opts.find((x) => /^other/i.test(x));
     return o ? { answer: o, source: 'default' } : { needsHuman: true, reason: 'referral source options' };
   }
