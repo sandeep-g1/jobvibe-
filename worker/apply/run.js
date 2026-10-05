@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { extractFields, fillField, atsOf, formUrl, comboOptions } from './forms.js';
 import { answerQuestion } from '../../src/lib/answers.js';
 import { draftAnswer } from '../../src/lib/essay.js';
+import { resolveChoice } from '../../src/lib/geo.js';
 
 // Matched only against text that appears after the submit click: job descriptions
 // themselves often say "Thank you for your interest in <company>".
@@ -33,7 +34,19 @@ export function blocksEligibility(f, r) {
   return isNo(r.answer);
 }
 const CLOSED = /job (you requested )?(was )?not found|(job|position|posting|role) (is )?no longer (available|open|active|accepting)|no longer accepting applications|(job|position|posting) has (been )?(closed|filled|expired)|this (job|position) (is )?closed|page (you('re| are) looking for )?(could not be|was not|wasn't) found/i;
-const CHALLENGE ='iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
+// Two field values that say the same thing: equal text, the same URL (http/https, www,
+// trailing slash), or the same city ("Bengaluru, Karnataka, IND" = "Bengaluru, India").
+// A site's own location pick is kept: retyping it as free text can clear an autocomplete.
+const urlKey = (s) => String(s).trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+function sameMeaning(a, b) {
+  const x = String(a ?? '').trim(), y = String(b ?? '').trim();
+  if (x.toLowerCase() === y.toLowerCase()) return true;
+  if (/^(https?:\/\/|www\.)/i.test(x) && /^(https?:\/\/|www\.)/i.test(y)) return urlKey(x) === urlKey(y);
+  const cx = resolveChoice(x.split(',')[0]), cy = resolveChoice(y.split(',')[0]);
+  return !!(cx?.city && cy?.city && cx.city === cy.city);
+}
+const PARSING =/analy[sz]ing (your )?(resume|cv)|parsing (your )?(resume|cv)|reading your (resume|cv)/i;
+const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
 
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
 
@@ -144,6 +157,18 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       if (!okFill && step.f.required) return { status: 'failed', reason: `could not fill "${step.f.label}"`, url, log };
     }
     await page.waitForTimeout(800);
+
+    // Some boards (Lever) read the uploaded CV in the background and then overwrite or clear
+    // fields already filled. Wait for that to finish, then put back anything that changed.
+    for (let i = 0; i < 20 && PARSING.test(await page.evaluate(() => document.body.innerText).catch(() => '')); i++) await page.waitForTimeout(1000);
+    for (const step of plan) {
+      if (!['text', 'email', 'tel', 'url', 'number', 'textarea'].includes(step.f.type)) continue;
+      const now = await page.locator(step.f.selector).first().inputValue().catch(() => null);
+      if (now != null && !sameMeaning(now, step.value)) {
+        log.push(`refilled "${step.f.label.slice(0, 50)}" (the site changed it to "${now.slice(0, 40)}")`);
+        await fillField(page, step.f, step.value).catch(() => false);
+      }
+    }
 
     // 3. Every required field must now hold a value.
     // Required is marked either way: the `required` attribute, or aria-required (Greenhouse).
