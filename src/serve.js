@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, queueCv,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -27,6 +27,7 @@ import {
 import { loginPage, signupPage } from './web/auth.js';
 import { onboardingPage, reviewPage } from './web/onboarding.js';
 import { answersPage, answersFromForm } from './web/answers.js';
+import { applicationsPage } from './web/applications.js';
 import { getAnswers } from './lib/answers.js';
 import { telegramConfigured, webhookSecret, handleUpdate, botUsername, newLinkCode, activate } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
@@ -413,6 +414,21 @@ export async function handler(req, res) {
       const out = await activate(`${proto}://${host}`);
       res.writeHead(303, { Location: `/settings?tg=${out.ok ? `ok&bot=${encodeURIComponent(out.username || '')}` : `err&msg=${encodeURIComponent(out.error || 'failed')}`}` });
       return res.end();
+    }
+
+    if (path === '/applications') {
+      return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid)));
+    }
+    const cvm = path.match(/^\/applications\/(\d+)\/cv$/);
+    if (cvm) {
+      const row = await queueCv(Number(cvm[1]), uid); // owner-scoped: another user's id returns nothing
+      if (!row?.cv_b64) return send(res, 404, 'text/html; charset=utf-8', notFoundPage('No CV saved for this application.'));
+      const name = String(row.cv_name || 'CV.docx').replace(/[^\w.\-]+/g, '_');
+      res.writeHead(200, {
+        'Content-Type': name.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store',
+      });
+      return res.end(Buffer.from(row.cv_b64, 'base64'));
     }
 
     if (path === '/answers' && req.method === 'GET') {

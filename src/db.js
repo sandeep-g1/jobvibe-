@@ -409,6 +409,29 @@ export async function nextQueued(limit = 1) {
   return d.query(`SELECT * FROM apply_queue WHERE status = 'queued' ORDER BY updated_at ASC LIMIT ?`, [limit]);
 }
 
+/** Keep the CV used for one application (downloadable from the Applications page). */
+export async function saveQueueCv(id, name, buffer) {
+  const d = await db();
+  await d.run('UPDATE apply_queue SET cv_name = ?, cv_b64 = ? WHERE id = ?', [name, buffer.toString('base64'), id]);
+}
+
+/** One application's CV, owner-scoped. */
+export async function queueCv(id, userId) {
+  const d = await db();
+  return d.one('SELECT cv_name, cv_b64 FROM apply_queue WHERE id = ? AND user_id = ?', [id, userId]);
+}
+
+/** Every application of a user, with job details, for the Applications page. */
+export async function applicationsForUser(userId) {
+  const d = await db();
+  return d.query(
+    `SELECT q.id, q.status, q.reason, q.detail, q.attempts, q.created_at, q.updated_at, q.cv_name,
+            CASE WHEN q.cv_b64 IS NULL THEN 0 ELSE 1 END AS has_cv,
+            j.title, j.company, j.city, j.country, j.work_mode, j.apply_url, j.final_url, j.apply_route, m.score
+       FROM apply_queue q JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? ORDER BY q.updated_at DESC`, [userId]);
+}
+
 export async function updateQueueItem(id, { status, reason = null, detail = null, attempts }) {
   const d = await db();
   await d.run(

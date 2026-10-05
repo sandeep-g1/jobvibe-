@@ -15,7 +15,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles,
+  initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv } from '../src/lib/secrets.js';
@@ -138,6 +138,8 @@ async function processItem(item, browser) {
   }
   const cvName = `${safe(profile.name || 'Resume')}_CV.${ext}`;
   const cvText = (await extractText(original, cvRow.filename || cvName, '')).text || '';
+  // Keep the CV used for this application so it can be downloaded later.
+  await saveQueueCv(item.id, `${safe(profile.name || 'Resume')}_${safe(job.company)}_${tailored ? 'tailored_' : ''}CV.${ext}`, cv);
 
   if (manualWhy) {
     await notify(profile, `✋ Please apply to ${label} yourself: ${h(manualWhy)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
@@ -176,7 +178,13 @@ async function processItem(item, browser) {
     await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)}` });
     return save('captcha', 'human check required', { filled });
   }
-  // failed: one retry later, then hand it over.
+  if (r.status === 'unconfirmed') {
+    // Submit was clicked but nothing confirmed it. Resending could apply twice, so ask instead.
+    await notify(profile, `⚠️ I submitted ${label}, but the site didn't confirm it. Please check ${h(profile.answers?.email || 'your job-hunt email')} for a confirmation. I won't resend it, to avoid applying twice.\n<a href="${h(job.url)}">Open the application</a>`);
+    if (r.screenshot) await notifyFile(profile, { kind: 'photo', buffer: r.screenshot, filename: 'after-submit.png', caption: `After submitting: ${h(job.title)}` });
+    return save('unconfirmed', r.reason, { filled, tailored });
+  }
+  // failed: one retry later (only if nothing was submitted, or the form clearly rejected it), then hand it over.
   const attempts = (item.attempts || 0) + 1;
   if (attempts < 2) return save('queued', r.reason, { lastError: r.reason }, attempts);
   await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself.`);

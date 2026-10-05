@@ -17,6 +17,27 @@ const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/
 
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
 
+/**
+ * The form's real submit button: visible, enabled, a submit-type control or one
+ * labelled submit/send/apply. Never "Apply with LinkedIn/Indeed" or tab links.
+ */
+async function findSubmit(page) {
+  const cands = page.locator('button, input[type=submit]');
+  const n = await cands.count();
+  let best = null;
+  for (let i = 0; i < n; i++) {
+    const c = cands.nth(i);
+    if (!(await c.isVisible().catch(() => false)) || !(await c.isEnabled().catch(() => false))) continue;
+    const text = ((await c.innerText().catch(() => '')) || (await c.getAttribute('value')) || '').trim();
+    if (/linkedin|indeed|google|seek|with |save|draft|cancel|back|upload|attach|locate/i.test(text)) continue;
+    const type = (await c.getAttribute('type')) || '';
+    const score = (/^(submit( application)?|send( application)?|apply( now)?|complete application)$/i.test(text) ? 3 : /submit|send/i.test(text) ? 2 : 0)
+      + (type === 'submit' ? 1 : 0);
+    if (score > 0 && (!best || score >= best.score)) best = { c, score };
+  }
+  return best?.c || null;
+}
+
 async function openForm(page, url) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(3500);
@@ -50,6 +71,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
   const context = await browser.newContext({ locale: 'en-IN', timezoneId: 'Asia/Kolkata', viewport: { width: 1366, height: 900 } });
   const page = await context.newPage();
   const log = [];
+  let clicked = false;
   try {
     const fields = await openForm(page, url);
     if (!fields.length) return { status: 'failed', reason: 'no application form found on the page', url };
@@ -115,9 +137,10 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     if (dryRun) return { status: 'dry_run', url, filled, screenshot, log };
 
     // 4. Submit and read the outcome.
-    const submit = page.locator('button, input[type=submit]').filter({ hasText: /submit|send application|apply/i }).last();
-    const submitInput = page.locator('input[type=submit]').last();
-    await ((await submit.count()) ? submit : submitInput).click({ timeout: 15000 });
+    const btn = await findSubmit(page);
+    if (!btn) return { status: 'failed', reason: 'could not find the submit button', url, filled, log };
+    await btn.click({ timeout: 15000 });
+    clicked = true; // from here on, never auto-retry unless the form clearly rejected it
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);
       const text = await page.evaluate(() => document.body.innerText).catch(() => '');
@@ -130,8 +153,14 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     }
     const errors = await page.evaluate(() => [...document.querySelectorAll('[class*="error" i], [role="alert"], .invalid-feedback')]
       .map((e) => e.innerText.trim()).filter(Boolean).slice(0, 5));
-    return { status: 'failed', reason: errors.length ? `form said: ${errors.join(' | ')}` : 'no confirmation after submitting', url, filled, log };
+    // The form showed errors: nothing was accepted, safe to fix and retry.
+    if (errors.length) return { status: 'failed', reason: `form said: ${errors.join(' | ')}`, url, filled, log, clicked, rejected: true };
+    // Clicked but no confirmation and no errors: it may have gone through. Never resend blindly.
+    return { status: 'unconfirmed', reason: 'submitted, but the site showed no confirmation', url, filled, log, clicked,
+      screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   } catch (err) {
+    // A crash after the submit click may still have submitted: don't resend blindly.
+    if (clicked) return { status: 'unconfirmed', reason: `after submitting: ${err.message.split('\n')[0]}`, url, log, clicked };
     return { status: 'failed', reason: err.message.split('\n')[0], url, log };
   } finally {
     await context.close();

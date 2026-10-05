@@ -114,6 +114,7 @@ function nav(active, extra = '') {
   ${tab('/reports', 'Reports', 'reports')}
   ${tab('/reports/latest', 'Latest Report', 'latest')}
   ${tab('/settings', 'Search Settings', 'settings')}
+  ${tab('/applications', 'Applications', 'applications')}
   ${tab('/answers', 'Application Answers', 'answers')}
   <span class="nav-right">${extra}</span>
 </div>`;

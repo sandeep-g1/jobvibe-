@@ -157,15 +157,17 @@ export async function fillField(page, f, answer) {
     const want = String(answer).trim().toLowerCase();
     const opts = page.locator('[role="option"]');
     const n = await opts.count();
-    for (let i = 0; i < n; i++) {
-      const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();
-      if (t === want) { await opts.nth(i).click(); return true; }
-    }
-    if (n > 0) {
-      // Filtered down to options containing what we typed: take the first.
-      const t = ((await opts.first().innerText().catch(() => '')) || '').trim().toLowerCase();
-      if (t.includes(want) || want.includes(t)) { await opts.first().click(); return true; }
-    }
+    // Best match, never just "the first suggestion": typing "India" lists
+    // "British Indian Ocean Territory (+246)" before "India (+91)".
+    const texts = [];
+    for (let i = 0; i < n; i++) texts.push(((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase());
+    const esc = want.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rank = (t) => (t === want ? 0
+      : new RegExp(`^${esc}(\\s|\\(|\\+|,|$)`).test(t) ? 1 // "india +91", "india (+91)"
+        : new RegExp(`(^|[^a-z])${esc}([^a-z]|$)`).test(t) ? 2 // whole word elsewhere
+          : want.includes(t) && t.length > 2 ? 3 : 9);
+    const best = texts.map((t, i) => ({ i, r: rank(t) })).filter((x) => x.r < 9).sort((a, b) => a.r - b.r || a.i - b.i)[0];
+    if (best) { await opts.nth(best.i).click(); return true; }
     // Typeahead places ("Pune, India" vs "Pune, Maharashtra, India"): search the first part only.
     const head = want.split(',')[0].trim();
     if (head && head !== want) {

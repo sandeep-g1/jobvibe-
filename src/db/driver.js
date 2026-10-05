@@ -372,6 +372,9 @@ const MIGRATIONS = [
   'ALTER TABLE job_matches ADD COLUMN decided_at TEXT',
   // Where the agent can apply for this job (JSON from lib/apply-route.js), cached.
   'ALTER TABLE jobs ADD COLUMN apply_route TEXT',
+  // The CV actually used for each application (tailored), for the Applications page.
+  'ALTER TABLE apply_queue ADD COLUMN cv_name TEXT',
+  'ALTER TABLE apply_queue ADD COLUMN cv_b64 TEXT',
 ];
 
 /* ------------------------------------------------------------------ */
