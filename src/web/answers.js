@@ -135,6 +135,7 @@ export function answersPage(profile, { saved = false, mailboxMsg = null } = {}) 
       <div class="card"><h3>Other common questions</h3>
         ${fld('Willing to relocate?', sel('a_relocate', a.relocate, yn))}
         ${fld('Highest degree', inp('a_degree', a.degree, 'list="deg"') + `<datalist id="deg">${DEGREES.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>`)}
+        ${fld('University / school (of highest degree)', inp('a_school', a.school, 'placeholder="e.g. Bangalore University"'))}
         ${fld('Field of study', inp('a_fieldOfStudy', a.fieldOfStudy, 'placeholder="e.g. Commerce, Mechanical Engineering"'))}
         ${fld('Graduation year', inp('a_graduationYear', a.graduationYear, 'placeholder="e.g. 2020"'))}
         ${fld('Driving licence?', sel('a_drivingLicense', a.drivingLicense, yn), 'Often asked in UAE and Australia.')}
@@ -212,7 +213,7 @@ export function answersFromForm(form, prev = {}) {
     noticePeriodDays: notice === '' ? '' : Number(notice), servingNotice: form.a_servingNotice != null,
     lastWorkingDay: s('a_lastWorkingDay'), nationality: s('a_nationality'),
     relocate: ['yes', 'no'].includes(s('a_relocate')) ? s('a_relocate') : '',
-    degree: s('a_degree'), fieldOfStudy: s('a_fieldOfStudy'), graduationYear: s('a_graduationYear'),
+    degree: s('a_degree'), school: s('a_school'), fieldOfStudy: s('a_fieldOfStudy'), graduationYear: s('a_graduationYear'),
     drivingLicense: ['yes', 'no'].includes(s('a_drivingLicense')) ? s('a_drivingLicense') : '',
     languages: s('a_languages'),
     eeo: { gender: s('eeo_gender') || EEO_DECLINE, ethnicity: s('eeo_ethnicity') || EEO_DECLINE,

@@ -8,7 +8,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { extractFields, fillField, atsOf, formUrl } from './forms.js';
+import { extractFields, fillField, atsOf, formUrl, comboOptions } from './forms.js';
 import { answerQuestion } from '../../src/lib/answers.js';
 import { draftAnswer } from '../../src/lib/essay.js';
 
@@ -58,7 +58,13 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const plan = [];
     const ask = [];
     for (const f of fields) {
-      const q = { label: f.label, type: f.type === 'radio' ? 'select' : f.type, options: f.options, required: f.required };
+      // Searchable dropdowns: read the real choices so answers pick one of them.
+      if (f.type === 'combobox' && !f.options?.length) f.options = await comboOptions(page, f);
+      // A 100-item list is a page of a searchable directory (schools, cities): answer with the
+      // stored text and let the filler search for it, instead of choosing from a partial list.
+      if (f.type === 'combobox' && f.options?.length >= 100) { f.options = []; f.allowOther = /school|university|college|institution|employer|company/i.test(f.label); }
+      const qType = f.type === 'radio' || (f.type === 'combobox' && f.options?.length) ? 'select' : f.type === 'combobox' ? 'text' : f.type;
+      const q = { label: f.label, type: qType, options: f.options, required: f.required };
       const r = answerQuestion(q, profile, { country: job.country || 'IN', company: job.company, cvText });
       if (r.answer === 'CV_FILE') { plan.push({ f, value: cvPath, source: 'CV' }); continue; }
       if (r.essay) {
@@ -85,7 +91,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     await page.waitForTimeout(800);
 
     // 3. Every required field must now hold a value.
-    const empty = await page.evaluate(() => [...document.querySelectorAll('input[required], select[required], textarea[required]')]
+    const empty = await page.evaluate(() => [...document.querySelectorAll('input[required]:not([role="combobox"]), select[required], textarea[required]')]
       .filter((el) => el.offsetParent !== null && el.type !== 'file')
       .filter((el) => (el.type === 'checkbox' || el.type === 'radio')
         ? !document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`)

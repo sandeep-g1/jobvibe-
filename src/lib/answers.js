@@ -34,7 +34,7 @@ export function defaultAnswers(profile = {}) {
     phone: '', email: (profile.emailTo || [])[0] || '', linkedin: '', portfolio: '',
     currentEmployer: '', currentTitle: '', currentCtcLpa: '',
     noticePeriodDays: '', servingNotice: false, lastWorkingDay: '',
-    nationality: '', relocate: '', degree: '', fieldOfStudy: '', graduationYear: '',
+    nationality: '', relocate: '', degree: '', school: '', fieldOfStudy: '', graduationYear: '',
     drivingLicense: '', languages: '',
     eeo: { gender: EEO_DECLINE, ethnicity: EEO_DECLINE, veteran: EEO_DECLINE, disability: EEO_DECLINE },
     consentStandard: false,
@@ -263,7 +263,8 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/^(legal )?last name|surname|family name/.test(t)) return text(n.last, 'name', 'last name');
   if (/preferred (first )?name/.test(t)) return text(n.first, 'name', 'preferred name');
   if (/^(full |legal )?name\b/.test(t)) return text(profile.name, 'name', 'name');
-  if (/e-?mail/.test(t) && !/confirm|marketing|newsletter/.test(t)) return text(a.email, 'email', 'email');
+  // Only a short label is the email field ("you'll write to clients via email…" is an essay).
+  if (/e-?mail/.test(t) && t.length <= 45 && !/confirm|marketing|newsletter/.test(t)) return text(a.email, 'email', 'email');
   if (/phone|mobile|contact number/.test(t)) return text(a.phone, 'phone', 'phone');
   if (/linkedin/.test(t)) return text(a.linkedin, 'linkedin', 'LinkedIn URL');
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
@@ -292,6 +293,24 @@ export function answerQuestion(q, profile, ctx = {}) {
   }
   if (/citizenship|nationality/.test(t)) return text(a.nationality, 'nationality', 'nationality');
 
+  // ---- messaging / marketing opt-ins: always no ----
+  if (/opt[- ]?in|whatsapp|\bsms\b|text messages?|newsletter|marketing (emails?|communications?)/.test(t) && !/privacy|processing of my personal data/.test(t)) {
+    if (q.type === 'checkbox') return { answer: false, source: 'no marketing / messages' };
+    return yesno(false, 'no marketing / messages');
+  }
+
+  // ---- questions that only apply if the candidate lives somewhere else ("If located in the US, …") ----
+  const condWhere = t.match(/^if (you are |you're |you )?(located|based|living|residing|reside|live) in (the )?([a-z .]+?)[,?]/);
+  if (condWhere) {
+    const there = countryIn(condWhere[4]);
+    const homeCc = (resolveChoice(profile.baseCity) || {}).cc;
+    if (there && homeCc && there !== homeCc) {
+      if (!isChoice) return { answer: 'Not applicable', source: `not located in ${COUNTRY_NAMES[there]}` };
+      const na = opts.find((o) => /not applicable|n\/a|none|not located|outside/i.test(o));
+      return na ? { answer: na, source: `not located in ${COUNTRY_NAMES[there]}` } : { needsHuman: true, reason: 'conditional location question' };
+    }
+  }
+
   // ---- where the candidate is / can work ----
   const home = resolveChoice(profile.baseCity) || {};
   const homeCountry = home.cc ? COUNTRY_NAMES[home.cc] : '';
@@ -300,6 +319,24 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/country of residence|country (do )?you (currently )?(live|reside)|current country|^country\b|country (in which|where) you (are|currently) (located|based|reside)|choose the country/.test(t)) return text(homeCountry, 'your city', 'base city');
   if (/^location\b|current location|where are you (currently )?(based|located)|city of residence|current city|which city/.test(t) && !/prefer/.test(t)) {
     return text(city && homeCountry ? city + ', ' + homeCountry : '', 'your city', 'base city');
+  }
+  // "Do you plan to work remotely?" → from the user's accepted work modes and cities.
+  if (/(plan|intend|prefer|want|like) to work remotely|work remotely or (from|in) (an|the) office|remote or (in[- ]office|on[- ]?site)/.test(t)) {
+    const modes = (profile.workModes || []).map((m) => m.toLowerCase());
+    const officeOk = !modes.length || modes.some((m) => m !== 'remote');
+    const remoteOk = !modes.length || modes.includes('remote');
+    const scope = userScope(profile);
+    const cityOk = ctx.city ? scope.cities.has(ctx.city) || scope.countries.has(ctx.country || 'IN') : scope.cities.size > 0;
+    const wantsRemote = remoteOk && !(officeOk && cityOk);
+    return yesno(wantsRemote, wantsRemote ? 'you prefer remote' : 'job is in your city; you accept office work');
+  }
+  // Which country would you work from remotely → home country.
+  if (/(remote location|work(ing)? remotely|remote basis).{0,100}(which|what) country|country.{0,40}(would|will|do) you (be )?(work|working) from/.test(t)) {
+    return text(homeCountry, 'your city', 'base city');
+  }
+  // Countries you expect to work in → the job's country.
+  if (/countr(y|ies).{0,40}(anticipate|expect|plan|intend|would like).{0,25}work/.test(t)) {
+    return text(COUNTRY_NAMES[ctx.country || 'IN'], "the job's country", 'country');
   }
   const named = (label.match(/[A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)?/g) || []).map((w2) => resolveChoice(w2)).filter((r) => r && r.city);
   if (named.length && /(currently )?(based|located|living|residing) in/.test(t)) {
@@ -342,6 +379,9 @@ export function answerQuestion(q, profile, ctx = {}) {
     return profile.totalExpYears == null ? { needsHuman: true, reason: 'years of experience not set' } : text(String(profile.totalExpYears), 'years of experience');
   }
   if (/years.{0,30}experience (with|in|using)|experience (with|in) .{2,40}\?/.test(t)) return { needsHuman: true, reason: 'skill-specific experience (answer once, reused after)' };
+  if (/^(school|university|college|institution|institute)( name)?$|name of (your )?(school|university|college|institution)|which (school|university|college)/.test(t)) {
+    return text(a.school, 'school / university', 'school or university');
+  }
   if (/highest (level of )?(education|degree|qualification)|degree/.test(t) && !/field|major|discipline/.test(t)) return text(a.degree, 'degree', 'highest degree');
   if (/field of study|major|discipline|specialization/.test(t)) return text(a.fieldOfStudy, 'field of study', 'field of study');
   if (/graduat.{0,20}year|year of (graduation|passing)/.test(t)) return text(a.graduationYear, 'graduation year', 'graduation year');

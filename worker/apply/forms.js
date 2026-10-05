@@ -24,6 +24,13 @@ export function atsOf(url) {
 /** The URL of the application form itself for a job URL. */
 export function formUrl(url, ats) {
   const u = new URL(url);
+  // Greenhouse: use the embeddable application form. Employers wrap the normal
+  // job page in their own careers sites (Stripe, Okta…); the embed is always the
+  // plain Greenhouse form.
+  if (ats === 'greenhouse') {
+    const m = u.pathname.match(/^\/([^/]+)\/jobs\/(\d+)/);
+    if (m && !u.pathname.startsWith('/embed')) return `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}`;
+  }
   if (ats === 'lever') return u.pathname.endsWith('/apply') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/apply`;
   if (ats === 'ashby') return u.pathname.endsWith('/application') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/application`;
   return u.href;
@@ -39,10 +46,18 @@ export async function extractFields(page) {
     const sel = (el) => (el.id ? `#${CSS.escape(el.id)}` : el.name ? `${el.tagName.toLowerCase()}[name="${CSS.escape(el.name)}"]` : null);
 
     // Where the question text lives, per ATS. Order matters: most specific first.
+    // Button-ish label text on file inputs ("Attach", "Upload") is not the question.
+    const GENERIC = /^(attach|upload|choose( a)? file|browse|select file|drop files?.*|or|enter manually)$/i;
     const questionText = (el) => {
       if (el.id) {
         const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-        if (l && txt(l) && !['radio', 'checkbox'].includes(el.type)) return txt(l);
+        if (l && txt(l) && !['radio', 'checkbox'].includes(el.type) && !GENERIC.test(txt(l))) return txt(l);
+      }
+      // File uploads: the section heading (Greenhouse: <div class="file-upload"><div class="label">Resume/CV</div>…).
+      if (el.type === 'file') {
+        const box = el.closest('[class*="file-upload"], [class*="upload"], .field, fieldset, [role="group"]');
+        const head = box && [...box.querySelectorAll('label, legend, [class*="label"], [id$="-label"]')].map(txt).find((t) => t && !GENERIC.test(t));
+        if (head) return head;
       }
       const lever = el.closest('.application-question, li.application-question');
       if (lever) { const t = lever.querySelector('.application-label, .text'); if (t && txt(t)) return txt(t); }
@@ -94,7 +109,9 @@ export async function extractFields(page) {
         g.required = g.required || required;
         continue;
       }
-      const f = { id: el.name || el.id, selector: sel(el), label: questionText(el), type, required };
+      // Searchable dropdowns (react-select & co.) look like text inputs but only accept their options.
+      const combo = type !== 'select' && (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete') === 'list' || /select__input/.test(el.className));
+      const f = { id: el.name || el.id, selector: sel(el), label: questionText(el), type: combo ? 'combobox' : type, required };
       if (type === 'select') f.options = [...el.options].map((o) => o.text.trim()).filter((t) => t && !/^(select|choose|please select|--)/i.test(t));
       if (type === 'file') f.accept = el.accept || '';
       if (f.selector) fields.push(f);
@@ -105,9 +122,68 @@ export async function extractFields(page) {
   });
 }
 
+const optionTexts = (page) => page.$$eval('[role="option"]', (os) => os
+  .filter((o) => o.offsetParent !== null).map((o) => (o.innerText || o.textContent || '').trim()).filter(Boolean));
+
+/** Open a searchable dropdown and read its options (closed again afterwards). */
+export async function comboOptions(page, f) {
+  const el = page.locator(f.selector).first();
+  try {
+    await el.click({ timeout: 5000 });
+    await page.waitForTimeout(500);
+    const opts = await optionTexts(page);
+    await el.press('Escape').catch(() => {});
+    return opts.slice(0, 300);
+  } catch { return []; }
+}
+
 /** Fill one field with an answer from the answer engine. Returns true if it took. */
 export async function fillField(page, f, answer) {
   const el = page.locator(f.selector).first();
+  if (f.type === 'combobox') {
+    // Type to filter, then click the option whose text is the answer.
+    await el.click({ timeout: 5000 });
+    await el.fill('');
+    await el.pressSequentially(String(answer).slice(0, 40), { delay: 15 });
+    await page.waitForTimeout(700);
+    const want = String(answer).trim().toLowerCase();
+    const opts = page.locator('[role="option"]');
+    const n = await opts.count();
+    for (let i = 0; i < n; i++) {
+      const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();
+      if (t === want) { await opts.nth(i).click(); return true; }
+    }
+    if (n > 0) {
+      // Filtered down to options containing what we typed: take the first.
+      const t = ((await opts.first().innerText().catch(() => '')) || '').trim().toLowerCase();
+      if (t.includes(want) || want.includes(t)) { await opts.first().click(); return true; }
+    }
+    // Typeahead places ("Pune, India" vs "Pune, Maharashtra, India"): search the first part only.
+    const head = want.split(',')[0].trim();
+    if (head && head !== want) {
+      await el.fill('');
+      await el.pressSequentially(head, { delay: 15 });
+      await page.waitForTimeout(1500);
+      const m = await opts.count();
+      for (let i = 0; i < m; i++) {
+        const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();
+        if (t.startsWith(head)) { await opts.nth(i).click(); return true; }
+      }
+    }
+    // Directories (schools, employers) that don't list it: their own "Other" entry.
+    if (f.allowOther) {
+      await el.fill('');
+      await el.pressSequentially('Other', { delay: 15 });
+      await page.waitForTimeout(1000);
+      const m = await opts.count();
+      for (let i = 0; i < m; i++) {
+        const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();
+        if (t === 'other' || t.startsWith('other ')) { await opts.nth(i).click(); return true; }
+      }
+    }
+    await el.press('Escape').catch(() => {});
+    return false;
+  }
   if (f.type === 'file') { await el.setInputFiles(answer); return true; }
   if (f.type === 'select') {
     await el.selectOption({ label: String(answer) }).catch(async () => el.selectOption(String(answer)));
