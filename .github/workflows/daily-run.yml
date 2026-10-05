@@ -52,5 +52,5 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          SITE_URL: https://jobvibe-green.vercel.app
+          SITE_URL: https://jobvibe.evergreenskill.com
         run: npm run run -- ${{ github.event_name == 'schedule' && '--once-per-day' || (github.event.inputs.user != '' && format('--user {0}', github.event.inputs.user)) || '' }}

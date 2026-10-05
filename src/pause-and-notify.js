@@ -13,7 +13,7 @@ import { db } from './db/driver.js';
 import { loadSecretsIntoEnv } from './lib/secrets.js';
 import { sendEmail, emailConfigured } from './email.js';
 
-const SITE = process.env.SITE_URL || 'https://jobvibe-green.vercel.app';
+const SITE = process.env.SITE_URL || 'https://jobvibe.evergreenskill.com';
 const argv = process.argv.slice(2);
 const PAUSE = argv.includes('--pause');
 const SEND = argv.includes('--send');

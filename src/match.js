@@ -140,7 +140,7 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   const applied = await appliedSet(userId);
   writeReport(rows, { profile, runId, errors: [], perSource, applied });
 
-  const siteUrl = (process.env.SITE_URL || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
+  const siteUrl = (process.env.SITE_URL || 'https://jobvibe.evergreenskill.com').replace(/\/+$/, '');
   let digest = { sent: false, reason: 'email disabled for this run' };
   if (email) digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
 

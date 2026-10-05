@@ -25,6 +25,6 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          SITE_URL: https://jobvibe-green.vercel.app
+          SITE_URL: https://jobvibe.evergreenskill.com
           PREVIEW_OUT: /tmp/notice-preview.html
         run: node src/pause-and-notify.js --reminder --send

@@ -17,7 +17,7 @@ import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUse
 const token = () => cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
 export const telegramConfigured = () => !!token();
 const apiBase = () => `${cleanEnv(process.env.TELEGRAM_API_BASE) || 'https://api.telegram.org'}/bot${token()}`;
-const siteUrl = () => (cleanEnv(process.env.SITE_URL) || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
+const siteUrl = () => (cleanEnv(process.env.SITE_URL) || 'https://jobvibe.evergreenskill.com').replace(/\/+$/, '');
 
 export async function tg(method, params = {}) {
   if (!telegramConfigured()) return { ok: false, description: 'TELEGRAM_BOT_TOKEN is not set' };

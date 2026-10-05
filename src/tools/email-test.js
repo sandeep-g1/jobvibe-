@@ -32,7 +32,7 @@ console.log(`  provider    : ${emailConfigured() ? 'RESEND_API_KEY present' : 'R
 console.log(`  subject     : ${buildSubject(rows, profile)}`);
 console.log('');
 
-const siteUrl = (process.env.SITE_URL || 'https://jobvibe-green.vercel.app').replace(/\/+$/, '');
+const siteUrl = (process.env.SITE_URL || 'https://jobvibe.evergreenskill.com').replace(/\/+$/, '');
 const res = await sendDigest(rows, { profile, runId: run.id, siteUrl });
 
 if (res.sent) {
