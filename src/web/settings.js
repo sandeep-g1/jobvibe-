@@ -281,7 +281,7 @@ export function settingsPage(profile, fields, opts = {}) {
     : `<div class="saved" style="background:#fee2e2;color:#991b1b;border-color:#f0b6b8">Telegram activation failed: ${esc(tg.msg)}</div>`) : ''}
   ${isAdmin && secrets.length ? keysCard(secrets) : ''}
 
-  <form method="POST" action="/settings">
+  <form method="POST" action="/settings" onsubmit="return keysGuard()">
     <div class="grid g2">
       <div class="card" id="profile"><h3>About you</h3>
         ${group(['name', 'totalExpYears', 'baseCity'])}</div>
@@ -309,6 +309,15 @@ export function settingsPage(profile, fields, opts = {}) {
 
 ${TAGS_SCRIPT}
 <script>
+// Keys live in their own form; "Save settings" would silently drop a pasted key.
+function keysGuard() {
+  var typed = [].some.call(document.querySelectorAll('#keysForm input'), function (i) { return i.value.trim(); });
+  if (!typed) return true;
+  alert('You typed a key. Click "Save keys" (under the keys) to save it. "Save settings" does not save keys.');
+  var b = document.querySelector('#keysForm button[type=submit]');
+  if (b) { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); b.focus(); }
+  return false;
+}
 var runStart = 0, runTimer = null;
 var STAGES = [
   [0,   'Queuing the search…'],
