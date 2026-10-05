@@ -235,6 +235,12 @@ async function main() {
   if (!takeLock()) { console.log('Another worker is already running.'); return; }
   await initDB();
   await loadSecretsIntoEnv();
+  // Going live after test runs: jobs that were only test-filled get applied to for real.
+  if (!DRY) {
+    const d = await db();
+    const n = (await d.query(`SELECT id FROM apply_queue WHERE status = 'dry_run'`)).length;
+    if (n) { await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL WHERE status = 'dry_run'`); log(`${n} test-run job(s) queued to apply for real`); }
+  }
   const browser = await chromium.launch({ headless: !HEADED });
   log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}`);
   if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
