@@ -164,14 +164,19 @@ export async function sendDigest(chatId, matches, { total, runId } = {}) {
  * Ask a user something the agent can't answer itself. Their reply is saved to
  * their answer bank under this question.
  */
-export async function askUser(userId, profile, question, { context } = {}) {
+export async function askUser(userId, profile, question, { context, options = [] } = {}) {
   const chatId = profile?.telegram?.chatId;
   if (!chatId) return { ok: false, error: 'telegram not connected' };
-  const r = await send(chatId,
-    `❓ <b>The agent needs you</b>${context ? `\n${h(context)}` : ''}\n\n${h(question)}\n\n<i>Reply to this message with your answer. It's saved and reused next time.</i>`,
-    { forceReply: true });
+  // Multiple choice with a few short options: tap buttons, so an answer can't land on the wrong question.
+  const opts = (options || []).map(String).filter(Boolean);
+  const buttons = opts.length >= 2 && opts.length <= 8 && opts.every((o) => o.length <= 40)
+    ? opts.map((o, i) => [{ text: o, callback_data: `qa:${i}` }]) : null;
+  const head = `❓ <b>The agent needs you</b>${context ? `\n${h(context)}` : ''}\n\n${h(question)}\n\n`;
+  const r = buttons
+    ? await send(chatId, `${head}<i>Tap your answer. It's saved and reused next time.</i>`, { buttons })
+    : await send(chatId, `${head}<i>Reply to this message with your answer. It's saved and reused next time.</i>`, { forceReply: true });
   if (!r.ok) return { ok: false, error: r.description };
-  const pending = [...(profile.telegram.pending || []), { id: r.result.message_id, q: question, at: Date.now() }].slice(-20);
+  const pending = [...(profile.telegram.pending || []), { id: r.result.message_id, q: question, at: Date.now(), ...(buttons ? { options: opts } : {}) }].slice(-20);
   await save(userId, { ...profile, telegram: { ...profile.telegram, pending } });
   return { ok: true, messageId: r.result.message_id };
 }
@@ -252,6 +257,23 @@ async function onCallback(cb) {
   const [kind, idStr] = String(cb.data || '').split(':');
   const id = Number(idStr);
   const answer = (text) => tg('answerCallbackQuery', { callback_query_id: cb.id, text });
+
+  // Answer buttons on an agent question: save the tapped option to the answer bank.
+  if (kind === 'qa') {
+    const owner = await profileByChat(chatId);
+    if (!owner || cb.from?.id !== chatId) return answer('This button belongs to another account.');
+    const p = owner.data;
+    const pend = (p.telegram?.pending || []).find((x) => x.id === cb.message?.message_id);
+    const choice = pend?.options?.[Number(idStr)];
+    if (!pend || choice == null) return answer('This question was already answered.');
+    const answers = { ...(p.answers || {}) };
+    answers.custom = [...(answers.custom || []).filter((c) => c.q !== pend.q), { q: pend.q, a: choice, updatedAt: new Date().toISOString() }];
+    await save(owner.userId, { ...p, answers, telegram: { ...p.telegram, pending: p.telegram.pending.filter((x) => x.id !== pend.id) } });
+    await requeueNeedsUser(owner.userId);
+    await tg('editMessageText', { chat_id: chatId, message_id: cb.message.message_id, parse_mode: 'HTML',
+      text: `✅ <b>${h(pend.q)}</b>\n${h(choice)}\n<i>Saved. I'll use this from now on.</i>` });
+    return answer('Saved');
+  }
 
   // Reply buttons on inbox alerts: rs = send the drafted reply, rd = user handles it.
   if (kind === 'rs' || kind === 'rd') {

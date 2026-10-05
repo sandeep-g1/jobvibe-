@@ -120,6 +120,17 @@ export function pickOption(answer, options = []) {
   const exact = opts.find((x) => x.l === a);
   if (exact) return exact.o;
 
+  // A typed reply to a yes/no question ("fluent in english not polish", "yes, 5 years"):
+  // read it as yes or no when it clearly is one; anything unsure isn't guessed.
+  const hasYes = opts.some((x) => YES.test(x.l)), hasNo = opts.some((x) => NO.test(x.l));
+  if (hasYes && hasNo && !/^(yes|no)$/.test(a)) {
+    // Numbers ("i have 2 years" to "at least 4 years?") are never guessed into a yes.
+    const yn = /not sure|maybe|depends|unsure|don.?t know/.test(a) || (/\d/.test(a) && !/^(yes|no)\b/.test(a)) ? null
+      : /^(yes|yeah|yep|y|sure|of course|correct|i am|i do|i have|i can)\b/.test(a) ? true
+        : /^(no|nope|n|never|none|i am not|i'm not|i do not|i don't|i have not|i can't|cannot)\b|\bnot\b/.test(a) ? false : null;
+    if (yn !== null) return pickOption(yn, options);
+  }
+
   // Numbers: notice periods arrive as a number of days; years of experience
   // as a numeric string. Choose the option whose range contains the value.
   const isDays = typeof answer === 'number' || /^\d+ days?$/.test(a);

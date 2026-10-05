@@ -154,7 +154,7 @@ async function processItem(item, browser) {
     for (const q of r.questions) {
       if (asked.has(q.label)) continue;
       profile = await loadProfileAsync(item.user_id); // askUser stores pending questions on the profile
-      const a = await askUser(item.user_id, profile, q.label, { context: `${job.title} at ${job.company}` });
+      const a = await askUser(item.user_id, profile, q.label, { context: `${job.title} at ${job.company}`, options: q.options });
       if (a.ok) asked.add(q.label);
     }
     return save('needs_user', r.questions.map((q) => q.label).join(' | '), { asked: [...asked] });

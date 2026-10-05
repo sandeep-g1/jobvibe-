@@ -77,7 +77,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
         } else plan.push({ f, value: d.text, source: 'AI draft' });
         continue;
       }
-      if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason }); continue; }
+      if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason, options: f.options || [] }); continue; }
       if (r.answer === '' || r.answer == null) continue;
       plan.push({ f, value: r.answer, source: r.source });
     }
