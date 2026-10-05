@@ -34,8 +34,15 @@ export function matchApplication(mail, applications) {
   return best ? best.app : null;
 }
 
+// Senders that are never an employer replying (unless the mail names one of her applications).
+const NOISE = /(youtube|accounts\.google|google\.com|googlemail|facebookmail|instagram|twitter|x\.com|amazon|flipkart|swiggy|zomato|paytm|phonepe|netflix|spotify|resend\.dev|jobvibe)/i;
+
 export function looksJobRelated(mail, applications) {
-  return !!matchApplication(mail, applications) || JOBBY.test(`${mail.subject} ${String(mail.text).slice(0, 1500)}`);
+  if (matchApplication(mail, applications)) return true;
+  const ownDomain = (process.env.EMAIL_FROM || '').match(/@([a-z0-9.-]+)/i)?.[1];
+  if (NOISE.test(mail.from) || (ownDomain && lc(mail.from).includes(ownDomain.toLowerCase()))) return false;
+  if (/^jobvibe/i.test(String(mail.subject))) return false; // our own digest emails
+  return JOBBY.test(`${mail.subject} ${String(mail.text).slice(0, 1500)}`);
 }
 
 function parse(text) {
