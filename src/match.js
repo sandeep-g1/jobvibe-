@@ -23,7 +23,7 @@ const MANUAL_EXTRA = 3;
 
 /** Can the agent apply on its own? (job's own system, or a route already resolved) — no network. */
 function quickAuto(job) {
-  if (AUTO_ATS.includes(job.source) || atsOfUrl(job.final_url || job.apply_url)) return true;
+  if (AUTO_ATS.includes(job.source) || AUTO_ATS.includes(atsOfUrl(job.final_url || job.apply_url))) return true;
   try { return JSON.parse(job.apply_route || '{}').route === 'auto'; } catch { return false; }
 }
 import { telegramConfigured, sendDigest as sendTelegram } from './lib/telegram.js';

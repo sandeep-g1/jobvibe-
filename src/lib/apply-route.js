@@ -11,7 +11,11 @@
 // Results are cached on jobs.apply_route for a week.
 import { db } from '../db/driver.js';
 
-export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee'];
+// SmartRecruiters is not here: its application form sits behind DataDome bot
+// protection, which blocks automated browsers. We don't work around bot checks,
+// so SmartRecruiters jobs are "you apply".
+export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'recruitee'];
+const BOT_PROTECTED = new Set(['smartrecruiters']);
 const CACHE_DAYS = 7;
 
 const HOSTS = {
@@ -57,7 +61,19 @@ const BOARDS = {
     ?.map((j) => ({ title: j.title, url: `https://job-boards.greenhouse.io/${s}/jobs/${j.id}` })),
   lever: async (s) => { const j = await get(`https://api.lever.co/v0/postings/${s}?mode=json`); return Array.isArray(j) ? j.map((x) => ({ title: x.text, url: x.hostedUrl })) : null; },
   ashby: async (s) => (await get(`https://api.ashbyhq.com/posting-api/job-board/${s}`))?.jobs?.map((j) => ({ title: j.title, url: j.jobUrl })),
-  workable: async (s) => (await get(`https://apply.workable.com/api/v1/widget/accounts/${s}`))?.jobs?.map((j) => ({ title: j.title, url: j.url })),
+  // Workable's careers-page API (the old v1 widget endpoint no longer answers).
+  workable: async (s) => {
+    try {
+      const r = await fetch(`https://apply.workable.com/api/v3/accounts/${s}/jobs`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'JobVibe/1.0' },
+        body: JSON.stringify({ query: '', location: [], department: [], worktype: [], remote: [] }),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return (j.results || []).map((x) => ({ title: x.title, url: `https://apply.workable.com/${s}/j/${x.shortcode}/` }));
+    } catch { return null; }
+  },
   recruitee: async (s) => (await get(`https://${s}.recruitee.com/api/offers/`))?.offers?.map((o) => ({ title: o.title, url: o.careers_url })),
   smartrecruiters: async (s) => (await get(`https://api.smartrecruiters.com/v1/companies/${s}/postings?limit=100`))?.content
     ?.map((p) => ({ title: p.name, url: `https://jobs.smartrecruiters.com/${s}/${p.id}` })),
@@ -72,6 +88,7 @@ export async function discoverOnBoards(company, title) {
       if (!jobs?.length) continue;
       for (const j of jobs) {
         const sim = titleSimilarity(title, j.title);
+        if (BOT_PROTECTED.has(ats)) continue;
         if (sim >= MIN_TITLE && (!best || sim > best.sim)) best = { ats, url: j.url, title: j.title, sim };
       }
     }
@@ -88,7 +105,7 @@ async function findInPool(job) {
   const cands = await d.query(
     `SELECT j.title, j.company, j.apply_url, j.final_url, j.source, j.source_job_id, c.ats_slug FROM jobs j
        LEFT JOIN companies c ON c.id = j.company_id
-      WHERE j.source IN ('greenhouse','lever','ashby','smartrecruiters') AND j.link_status != 'DEAD' AND j.last_seen_at > ?
+      WHERE j.source IN ('greenhouse','lever','ashby') AND j.link_status != 'DEAD' AND j.last_seen_at > ?
         AND LOWER(j.company) LIKE ?`,
     [new Date(Date.now() - 30 * 86400000).toISOString(), `%${co.split(' ')[0]}%`]);
   let best = null;
@@ -117,7 +134,9 @@ export async function resolveApplyRoute(job, { live = true } = {}) {
   const own = job.final_url || job.apply_url;
   const ownAts = atsOfUrl(own);
   let out;
-  if (AUTO_ATS.includes(job.source) || ownAts) {
+  if (BOT_PROTECTED.has(ownAts) || BOT_PROTECTED.has(job.source)) {
+    out = { route: 'manual', reason: `${ownAts || job.source} blocks automated applications (bot protection)` };
+  } else if (AUTO_ATS.includes(job.source) || ownAts) {
     out = { route: 'auto', ats: ownAts || job.source, url: own, via: 'job link' };
   } else {
     const pooled = await findInPool(job);
