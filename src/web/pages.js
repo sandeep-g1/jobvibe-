@@ -317,7 +317,7 @@ const EMAIL_STATUS = {
 const APP_STATUS = {
   queued: ['Queued', 'chip'], running: ['Applying…', 'chip'], submitted: ['✓ Applied', 'chip-g'],
   needs_user: ['Needs you', 'chip-r'], captcha: ['Finish it (CAPTCHA)', 'chip-r'], manual: ['Apply yourself', 'chip-n'],
-  blocked: ['Waiting on your answers', 'chip-r'], failed: ['Failed', 'chip-r'], skipped: ['Skipped', 'chip-n'], dry_run: ['Test run', 'chip-n'],
+  blocked: ['Waiting on your answers', 'chip-r'], waiting: ['⚡ Auto-apply soon', 'chip'], failed: ['Failed', 'chip-r'], skipped: ['Skipped', 'chip-n'], dry_run: ['Test run', 'chip-n'],
 };
 
 /** A skill in the bank, with a remove (−) button. */

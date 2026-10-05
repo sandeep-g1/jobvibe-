@@ -237,6 +237,8 @@ export function answerQuestion(q, profile, ctx = {}) {
   const cc = countryIn(label) || ctx.country || 'IN';
   const w = a.workAuth[cc] || {};
   const yesno = (bool, source) => {
+    // A lone checkbox: yes = tick it (its only option), no = leave it unticked.
+    if (q.type === 'checkbox' && opts.length <= 1) return { answer: bool ? (opts[0] ?? true) : false, source };
     if (!isChoice) return { answer: bool ? 'Yes' : 'No', source };
     const o = pickOption(bool, opts);
     return o ? { answer: o, source } : { needsHuman: true, reason: `no ${bool ? 'yes' : 'no'} option` };
@@ -351,7 +353,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   }
 
   // ---- notice, start date, relocation ----
-  if (/notice period|how soon.{0,20}join|joining time/.test(t)) {
+  if (/notice period|how soon.{0,20}join|joining time|^availability\b|available to start|when (can|could) you (start|join)/.test(t)) {
     if (a.noticePeriodDays === '') return { needsHuman: true, reason: 'notice period not set' };
     return isChoice ? text(Number(a.noticePeriodDays), 'notice period') : { answer: noticeText(a.noticePeriodDays), source: 'notice period' };
   }
@@ -361,6 +363,11 @@ export function answerQuestion(q, profile, ctx = {}) {
     return isChoice ? text(Number(a.noticePeriodDays), 'notice period') : { answer: startDate(a), source: 'notice period' };
   }
   if (/relocat/.test(t)) return a.relocate === '' ? { needsHuman: true, reason: 'relocation not set' } : yesno(a.relocate === 'yes', 'relocation');
+  if (/^(preferred )?(employment|job|contract) type$|full[- ]?time or part[- ]?time/.test(t)) {
+    const want = a.employmentType || 'Full-time';
+    const o = isChoice ? opts.find((x) => lc(x).replace(/[^a-z]/g, '') === lc(want).replace(/[^a-z]/g, '')) : want;
+    return o ? { answer: o, source: 'employment type (default full-time)' } : { needsHuman: true, reason: 'employment type' };
+  }
 
   // ---- money ----
   if (/(expected|desired|target|salary expectation|compensation expectation|expected ctc)/.test(t) && /(salary|ctc|compensation|pay|package)/.test(t)) {
@@ -416,7 +423,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   // ---- consent boxes ----
   if (/\b(i )?(agree|consent|acknowledge|certify|confirm|accept)(?!ments?\b)|privacy (policy|notice)|data (processing|protection)|gdpr|terms (and|&) conditions|information policy|have read/.test(t)) {
     // Marketing and talent-pool opt-ins: never ticked. A required one goes to the user.
-    if (/marketing|newsletter|sms|text message|whatsapp updates|talent (pool|community|network)|future (job|role|position|opening|vacanc|opportunit)|other (current or future |open |suitable )?(roles|positions|jobs|opportunities|openings)|keep (my|your) (data|information|details|cv|resume) (on file|for)|retain (my|your) .{0,40}for/.test(t)) {
+    if (/marketing|newsletter|sms|text message|whatsapp updates|talent (pool|community|network)|future (job|role|position|opening|vacanc|opportunit|recruit|hiring|application)|(subsequent|other|later) recruitment|other (current or future |open |suitable )?(roles|positions|jobs|opportunities|openings)|keep (my|your) (data|information|details|cv|resume) (on file|for)|retain (my|your) .{0,40}for/.test(t)) {
       if (q.required) return { needsHuman: true, reason: 'talent-pool / marketing consent is required here' };
       // A lone checkbox has no "No" option: declining means leaving it unticked.
       return q.type === 'checkbox' ? { answer: false, source: 'no marketing / talent pool' } : yesno(false, 'no marketing / talent pool');

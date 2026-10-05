@@ -12,6 +12,8 @@ export const ATS = {
   ashby: /(^|\.)ashbyhq\.com$/,
   smartrecruiters: /(^|\.)smartrecruiters\.com$/,
   workday: /(^|\.)myworkdayjobs\.com$/,
+  recruitee: /(^|\.)recruitee\.com$/,
+  workable: /(^|\.)workable\.com$/,
 };
 
 export function atsOf(url) {
@@ -31,6 +33,8 @@ export function formUrl(url, ats) {
     const m = u.pathname.match(/^\/([^/]+)\/jobs\/(\d+)/);
     if (m && !u.pathname.startsWith('/embed')) return `https://job-boards.greenhouse.io/embed/job_app?for=${m[1]}&token=${m[2]}`;
   }
+  // Recruitee: the offer page links to its application form at /o/<offer>/c/new.
+  if (ats === 'recruitee') { const m = u.pathname.match(/^\/o\/[^/]+/); if (m) return `${u.origin}${m[0]}/c/new`; }
   if (ats === 'lever') return u.pathname.endsWith('/apply') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/apply`;
   if (ats === 'ashby') return u.pathname.endsWith('/application') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/application`;
   return u.href;
@@ -99,9 +103,13 @@ export async function extractFields(page) {
         // The ATS's own UI toggles (Greenhouse "Upload PDF / Paste") are not questions.
         if (/_format$/.test(el.name || '')) continue;
         const key = el.name || el.id;
-        const optLabel = (el.id && txt(document.querySelector(`label[for="${CSS.escape(el.id)}"]`))) || txt(el.closest('label')) || el.value;
+        // A checkbox's own statement (aria-labelledby) beats a generic section heading ("Legal Agreements").
+        const ownIds = el.getAttribute('aria-labelledby');
+        const own = ownIds ? ownIds.split(/\s+/).map((i) => txt(document.getElementById(i))).filter(Boolean).join(' ') : '';
+        const optLabel = (el.id && txt(document.querySelector(`label[for="${CSS.escape(el.id)}"]`))) || txt(el.closest('label')) || (type === 'checkbox' && own) || el.value;
         if (!groups.has(key)) {
-          const g = { id: key, selector: `input[name="${CSS.escape(el.name)}"]`, label: questionText(el), type, options: [], values: [], required };
+          const label = type === 'checkbox' && own.length > 15 ? own : questionText(el);
+          const g = { id: key, selector: `input[name="${CSS.escape(el.name)}"]`, label, type, options: [], values: [], required };
           groups.set(key, g); fields.push(g);
         }
         const g = groups.get(key);

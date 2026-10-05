@@ -36,7 +36,7 @@ const argv = process.argv.slice(2);
 const ONCE = argv.includes('--once');
 const DRY = argv.includes('--dry-run');
 const HEADED = argv.includes('--headed');
-const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby']);
+const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby', 'recruitee']);
 const DEFAULT_DAILY_CAP = 10;
 const LOCK = join(tmpdir(), 'jobvibe-worker.lock');
 const log = (m) => console.log(`${new Date().toISOString().slice(11, 19)} ${m}`);
@@ -106,6 +106,25 @@ async function processItem(item, browser) {
     return 'capped';
   }
 
+  // Where to apply: the job's own form, or the same role on the employer's own system
+  // (Himalayas / Cutshort / aggregator listings). Decided before the CV is tailored.
+  const generic = process.env.WORKER_ALLOW_GENERIC === '1' && /^https?:\/\/(localhost|127\.0\.0\.1)/.test(job.url);
+  let ats = atsOf(job.url);
+  let manualWhy = null;
+  if (!generic && !SUPPORTED.has(ats)) {
+    const route = await resolveApplyRoute(job);
+    if (route.route === 'auto' && SUPPORTED.has(route.ats)) {
+      job.url = route.url; ats = route.ats;
+      log(`${item.user_id}: ${job.company} → applying via ${route.via}`);
+    } else if (route.route === 'auto') {
+      // An employer form we'll be able to fill once that system is supported: wait, don't hand off.
+      log(`${item.user_id}: ${job.company} waits for ${route.ats} support`);
+      return save('waiting', `form is on ${route.ats}; applies automatically once supported`, { waitAts: route.ats });
+    } else {
+      manualWhy = route.reason;
+    }
+  }
+
   // CV: tailored for this job when possible, else the original.
   const cvRow = await defaultResume(item.user_id);
   if (!cvRow?.content_b64) return save('blocked', 'no CV on file');
@@ -120,21 +139,10 @@ async function processItem(item, browser) {
   const cvName = `${safe(profile.name || 'Resume')}_CV.${ext}`;
   const cvText = (await extractText(original, cvRow.filename || cvName, '')).text || '';
 
-  // Where to apply: the job's own form, or the same role on the employer's own system
-  // (Himalayas / Cutshort / aggregator listings).
-  const generic = process.env.WORKER_ALLOW_GENERIC === '1' && /^https?:\/\/(localhost|127\.0\.0\.1)/.test(job.url);
-  let ats = atsOf(job.url);
-  if (!generic && !SUPPORTED.has(ats)) {
-    const route = await resolveApplyRoute(job);
-    if (route.route === 'auto' && SUPPORTED.has(route.ats)) {
-      job.url = route.url; ats = route.ats;
-      log(`${item.user_id}: ${job.company} → applying via ${route.via}`);
-    } else {
-      const why = route.route === 'auto' ? `its form is on ${route.ats}, which I can't fill yet` : route.reason;
-      await notify(profile, `✋ Please apply to ${label} yourself: ${h(why)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
-      await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
-      return save('manual', why);
-    }
+  if (manualWhy) {
+    await notify(profile, `✋ Please apply to ${label} yourself: ${h(manualWhy)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
+    await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
+    return save('manual', manualWhy);
   }
 
   log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);
@@ -191,6 +199,11 @@ async function inboxTick() {
 /* ---------------- loop ---------------- */
 async function unblockReady() {
   const d = await db();
+  // Jobs waiting for a form-filler that now exists go back in the queue.
+  for (const it of await d.query(`SELECT id, detail FROM apply_queue WHERE status = 'waiting'`)) {
+    const det = JSON.parse(it.detail || '{}');
+    if (SUPPORTED.has(det.waitAts)) await updateQueueItem(it.id, { status: 'queued', reason: null, detail: it.detail });
+  }
   for (const it of await d.query(`SELECT id, user_id FROM apply_queue WHERE status = 'blocked'`)) {
     const p = await loadProfileAsync(it.user_id);
     if (answerBankStatus(p).ready) await updateQueueItem(it.id, { status: 'queued', reason: null });
