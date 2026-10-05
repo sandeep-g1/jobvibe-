@@ -16,6 +16,16 @@ import { sendDigest } from './email.js';
 import { loadProfileAsync, missingProfile } from './lib/profile.js';
 import { userScope, inScope } from './lib/geo.js';
 import { aiRerank } from './lib/rerank.js';
+import { resolveApplyRoute, AUTO_ATS, atsOfUrl } from './lib/apply-route.js';
+
+// How many strong jobs the user must apply to themselves may join the auto-apply ones.
+const MANUAL_EXTRA = 3;
+
+/** Can the agent apply on its own? (job's own system, or a route already resolved) — no network. */
+function quickAuto(job) {
+  if (AUTO_ATS.includes(job.source) || atsOfUrl(job.final_url || job.apply_url)) return true;
+  try { return JSON.parse(job.apply_route || '{}').route === 'auto'; } catch { return false; }
+}
 import { telegramConfigured, sendDigest as sendTelegram } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
 
@@ -80,7 +90,12 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
 
   // AI recruiter pass over the strongest keyword candidates. When it works,
   // only jobs it actually read can reach the report.
-  const ai = await aiRerank(profile, scored);
+  // Prefer jobs the agent can apply to itself: give them most of the AI's reading budget,
+  // so they aren't crowded out by aggregator listings it can only hand back.
+  const byKeyword = scored.slice().sort((a, b) => b.result.score - a.result.score);
+  byKeyword.forEach((s) => { s.auto = quickAuto(s.job); });
+  const forAi = [...byKeyword.filter((s) => s.auto).slice(0, 45), ...byKeyword.filter((s) => !s.auto).slice(0, 15)];
+  const ai = await aiRerank(profile, forAi);
   log(`${userId}: AI judged ${ai.judged}${ai.ok ? '' : ` (keyword-only: ${ai.error || 'off'})`}`);
   const above = scored
     .filter((s) => !ai.ok || s.aiJudged)
@@ -110,17 +125,31 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   }
 
   const living = candidates.filter((s) => s.job.link_status !== STATUS.DEAD);
+
+  // Strong aggregator jobs (Himalayas, Cutshort…): look for the same role on the employer's own form.
+  let upgrades = 0;
+  for (const s of living.filter((x) => !x.auto && x.result.score >= 70).slice(0, 12)) {
+    const r = await resolveApplyRoute(s.job);
+    if (r.route === 'auto') { s.auto = true; upgrades++; }
+  }
+  if (upgrades) log(`${userId}: ${upgrades} aggregator job(s) routed to the employer's own form`);
+
+  // Auto-apply jobs first (source cap applies), then at most a few strong ones the user applies to.
   const taken = new Map();
-  const picked = [];
-  for (const s of living) {
-    if (picked.length >= limit) break;
+  const autos = [];
+  for (const s of living.filter((x) => x.auto)) {
+    if (autos.length >= limit) break;
     const n = taken.get(s.job.source) || 0;
     if (n >= perSourceCap) continue;
     taken.set(s.job.source, n + 1);
-    picked.push(s);
+    autos.push(s);
   }
-  for (const s of living) { if (picked.length >= limit) break; if (!picked.includes(s)) picked.push(s); }
-  picked.sort((a, b) => b.result.score - a.result.score);
+  for (const s of living.filter((x) => x.auto)) { if (autos.length >= limit) break; if (!autos.includes(s)) autos.push(s); }
+  const manual = living.filter((x) => !x.auto && x.result.score >= 75).slice(0, Math.min(MANUAL_EXTRA, Math.max(0, limit - autos.length)));
+  const picked = [...autos, ...manual];
+  // Remember the route on the job so Telegram and the report can label ⚡ / ✋ without another look-up.
+  for (const s of picked) if (!s.job.apply_route) s.job.apply_route = JSON.stringify(await resolveApplyRoute(s.job, { live: false }));
+  log(`${userId}: ${autos.length} auto-apply, ${manual.length} for you to apply`);
 
   for (const s of picked) {
     await insertMatch({

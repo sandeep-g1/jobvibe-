@@ -114,9 +114,17 @@ async function save(userId, data) {
 /*  Outbound                                                           */
 /* ------------------------------------------------------------------ */
 
+/** ⚡ when the agent can apply by itself, ✋ when the user has to. */
+export function routeTag(m) {
+  let r = null;
+  try { r = JSON.parse(m.apply_route || 'null'); } catch { /* none */ }
+  if (!r) return '';
+  return r.route === 'auto' ? '⚡ <b>Auto-apply</b>\n' : '✋ <b>You apply</b> (the agent can\'t reach this form)\n';
+}
+
 function jobLine(m) {
   const where = m.city ? m.city.replace(/\b\w/g, (c) => c.toUpperCase()) : (m.work_mode || '');
-  return `<b>${h(m.title)}</b>\n${h(m.company)}${where ? ` · ${h(where)}` : ''}${m.salary_raw ? ` · ${h(m.salary_raw)}` : ''}`;
+  return `${routeTag(m)}<b>${h(m.title)}</b>\n${h(m.company)}${where ? ` · ${h(where)}` : ''}${m.salary_raw ? ` · ${h(m.salary_raw)}` : ''}`;
 }
 
 const jobButtons = (m) => [

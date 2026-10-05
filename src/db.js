@@ -263,7 +263,7 @@ export async function candidateJobsForUser(userId, { days = 10, limit = 1500, co
   const cc = countries && countries.length ? countries : null;
   return d.query(
     `SELECT j.id, j.fingerprint, j.source, j.source_job_id, j.title, j.company, j.city,
-            j.country, j.location_raw,
+            j.country, j.location_raw, j.apply_route,
             j.work_mode, j.employment_type, j.min_exp, j.max_exp, j.salary_raw, j.jd_text,
             j.skills_required, j.skills_nice, j.apply_url, j.final_url, j.link_status,
             j.posted_at, j.alt_links
@@ -348,7 +348,7 @@ export async function matchesForRun(runId) {
   return d.query(
     `SELECT m.*, j.title, j.company, j.city, j.work_mode, j.employment_type, j.source,
             j.apply_url, j.final_url, j.link_status, j.posted_at, j.salary_raw,
-            j.min_exp, j.max_exp, j.alt_links, j.applicants, j.applicants_source
+            j.min_exp, j.max_exp, j.alt_links, j.applicants, j.applicants_source, j.apply_route
        FROM job_matches m JOIN jobs j ON j.id = m.job_id
       WHERE m.run_id = ? ORDER BY m.score DESC`,
     [runId]
@@ -360,7 +360,7 @@ export async function matchWithJob(matchId) {
   const d = await db();
   return d.one(
     `SELECT m.id, m.user_id, m.fingerprint, m.score, m.why_text, m.recommendation, m.decision,
-            j.title, j.company, j.city, j.country, j.work_mode, j.apply_url, j.final_url, j.salary_raw
+            j.title, j.company, j.city, j.country, j.work_mode, j.apply_url, j.final_url, j.salary_raw, j.apply_route
        FROM job_matches m JOIN jobs j ON j.id = m.job_id WHERE m.id = ?`,
     [matchId]
   );
@@ -380,9 +380,10 @@ export async function topMatchesForRun(runId, limit = 5) {
   const d = await db();
   return d.query(
     `SELECT m.id, m.score, m.why_text, m.recommendation, j.title, j.company, j.city, j.work_mode, j.salary_raw,
-            j.apply_url, j.final_url
+            j.apply_url, j.final_url, j.apply_route
        FROM job_matches m JOIN jobs j ON j.id = m.job_id
-      WHERE m.run_id = ? AND m.decision IS NULL ORDER BY m.score DESC LIMIT ?`,
+      WHERE m.run_id = ? AND m.decision IS NULL
+      ORDER BY CASE WHEN j.apply_route LIKE '%"route":"auto"%' THEN 0 ELSE 1 END, m.score DESC LIMIT ?`,
     [runId, limit]
   );
 }

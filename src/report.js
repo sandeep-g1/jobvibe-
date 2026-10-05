@@ -60,6 +60,7 @@ export function buildRows(matches, applied = new Set()) {
     applicants: m.applicants,
     applied: applied.has(m.fingerprint),
     decision: m.decision || null,
+    auto: (() => { try { return JSON.parse(m.apply_route || 'null')?.route || null; } catch { return null; } })(),
     isNew: true,
   }));
 }
@@ -132,7 +133,7 @@ function html(rows, { profile, runId, errors, perSource, date }) {
   .job-num { font-weight:700; color:#888; font-size:.8rem; }
   .job-title { font-weight:600; color:#1a1a2e; display:block; }
   .dec { font-size:.68rem; font-weight:700; padding:1px 7px; border-radius:8px; vertical-align:middle; white-space:nowrap; }
-  .dec-ok { background:#dcfce7; color:#15803d; } .dec-no { background:#f2f4f8; color:#8a94a6; }
+  .dec-ok { background:#dcfce7; color:#15803d; } .dec-no { background:#f2f4f8; color:#8a94a6; } .dec-auto { background:#eef4fc; color:#0a66c2; }
   .job-sub { font-size:.75rem; color:#8a94a6; margin-top:3px; }
   .company-name { color:#0a66c2; font-weight:500; }
 
@@ -328,6 +329,7 @@ function render(){
     tr.innerHTML =
       '<td class="job-num">'+j.n+'</td>'+
       '<td><span class="job-title">'+esc(j.title)+
+        (j.auto==='auto' ? ' <span class="dec dec-auto" title="The agent can apply by itself">⚡ Auto-apply</span>' : j.auto==='manual' ? ' <span class="dec dec-no" title="You apply yourself">✋ You apply</span>' : '')+
         (j.decision==='approved' ? ' <span class="dec dec-ok">✓ Approved</span>' : j.decision==='skipped' ? ' <span class="dec dec-no">Skipped</span>' : '')+'</span>'+
         '<span class="job-sub">'+esc(j.city)+' · <span class="src-badge">'+esc(j.sourceLabel)+'</span>'+
         (j.linkStatus==='UNVERIFIED'?'<span class="link-warn">unverified</span>':'')+'</span>'+
