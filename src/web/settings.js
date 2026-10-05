@@ -2,6 +2,7 @@
 // search on demand. Writes to the profiles table, so a change takes effect on
 // the next run with no redeploy and no file editing.
 import { layout, esc } from './pages.js';
+import { resolveChoice } from '../lib/geo.js';
 
 const MODES = ['On-site', 'Hybrid', 'Remote'];
 
@@ -103,6 +104,7 @@ export const FORM_CSS = `
   .tag-chip button { border:0; background:#d4e4f7; color:#0a4a8f; border-radius:50%; width:18px; height:18px;
     line-height:1; font-size:.9rem; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; }
   .tag-chip button:hover { background:#0a66c2; color:#fff; }
+  .tag-chip.tag-bad { background:#fee2e2; color:#991b1b; border-color:#f0b6b8; }
   .tag-add { display:flex; gap:8px; }
   .tag-add .tag-input { flex:1; }
   .tag-btn { padding:8px 16px; }
@@ -139,9 +141,11 @@ export function renderField(f, profile) {
   if (f.type === 'tags') {
     const arr = Array.isArray(val) ? val : [];
     const listId = `dl_${esc(f.key)}`;
+    // Locations we can't place are shown in red: they would silently match nothing.
+    const unknown = f.suggest === 'cities' ? arr.filter((c) => resolveChoice(c)?.unknown) : [];
     const chips = arr.map((c) =>
-      `<span class="tag-chip">${esc(c)}<button type="button" onclick="tagDel(this)" aria-label="Remove">×</button></span>`
-    ).join('');
+      `<span class="tag-chip${unknown.includes(c) ? ' tag-bad' : ''}">${esc(c)}<button type="button" onclick="tagDel(this)" aria-label="Remove">×</button></span>`
+    ).join('') + (unknown.length ? `<span class="help" style="color:#b91c1c">Not recognised: ${esc(unknown.join(', '))}. Check the spelling, or pick from the suggestions, otherwise no jobs match it.</span>` : '');
     const suggest = f.suggest === 'cities' ? CITY_SUGGEST : Array.isArray(f.suggest) ? f.suggest : [];
     const opts = suggest.map((c) => `<option value="${esc(c)}">`).join('');
     return `<div class="fld"><label>${esc(f.label)}</label>

@@ -9,6 +9,10 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, cleanEnv } from '../db/driver.js';
 import { getProfileRow } from '../db.js';
+import { resolveChoice, displayChoice } from './geo.js';
+
+/** A typed place with an obvious typo comes back as the real city name; anything else unchanged. */
+export const fixCity = (v) => { const r = resolveChoice(v); return r?.corrected ? displayChoice(r) : v; };
 
 const CANDIDATES = ['profile.local.json', 'profile.json', 'profile.example.json'];
 
@@ -128,6 +132,8 @@ export function normaliseProfile(input, previous = {}, only = null) {
     } else if (f.type === 'tags') {
       // Chips submit newline-joined; fields that allow it (locations) also split on commas.
       out[f.key] = String(raw || '').split(f.split ? /[\r\n,]+/ : /[\r\n]+/).map((x) => x.trim()).filter(Boolean);
+      // Locations: store the corrected spelling ("bengalore" → "Bengaluru").
+      if (f.suggest === 'cities') out[f.key] = [...new Set(out[f.key].map(fixCity))];
     } else if (f.type === 'modes' || f.type === 'sources') {
       out[f.key] = Array.isArray(raw) ? raw.filter(Boolean) : lines(raw);
     } else if (f.type === 'toggle') {

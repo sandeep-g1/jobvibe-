@@ -125,8 +125,61 @@ export function resolveChoice(choice) {
   if (fc) return fc;
   const cc = ccFromCountry(s) || Object.entries(COUNTRY_WORDS).find(([, re]) => re.test(s))?.[0];
   if (cc) return { cc, wholeCountry: true };
+  // Typos in what a user typed ("bengalore", "hydrabad"): closest known city name.
+  const near = nearestCity(s);
+  if (near) return { ...near, corrected: true };
   return { unknown: s };
 }
+
+/* ---------------- typo tolerance (user input only, never job postings) ---------------- */
+
+// Spellings people actually type, mapped to how we resolve them.
+const INDIA_NAMES = ['bengaluru', 'bangalore', 'hyderabad', 'secunderabad', 'mumbai', 'bombay', 'navi mumbai', 'thane',
+  'pune', 'delhi', 'new delhi', 'gurugram', 'gurgaon', 'noida', 'ghaziabad', 'chennai', 'madras', 'kolkata', 'calcutta',
+  'ahmedabad', 'gandhinagar', 'jaipur', 'kochi', 'cochin', 'ernakulam', 'trivandrum', 'thiruvananthapuram', 'coimbatore',
+  'indore', 'chandigarh', 'mohali', 'bhubaneswar', 'nagpur', 'vadodara', 'baroda', 'surat', 'lucknow', 'visakhapatnam',
+  'vizag', 'mysuru', 'mysore', 'mangaluru', 'mangalore', 'goa'];
+
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[m][n];
+}
+
+/** Closest known city to a misspelling, if it is clearly one city. */
+export function nearestCity(s) {
+  const t = String(s || '').toLowerCase().replace(/[^a-z ]/g, '').trim();
+  if (t.length < 4) return null;
+  const allowed = t.length <= 5 ? 1 : 2;
+  const cands = [];
+  for (const name of INDIA_NAMES) {
+    const dist = editDistance(t, name);
+    if (dist <= allowed) cands.push({ dist, r: { cc: 'IN', city: indiaCity(name) } });
+  }
+  for (const [cc, cities] of Object.entries(FOREIGN_CITIES)) {
+    for (const [canon, aliases] of Object.entries(cities)) {
+      for (const a of aliases) {
+        const dist = editDistance(t, a);
+        if (dist <= allowed) cands.push({ dist, r: { cc, city: canon } });
+      }
+    }
+  }
+  if (!cands.length) return null;
+  cands.sort((x, y) => x.dist - y.dist);
+  const best = cands.filter((c) => c.dist === cands[0].dist);
+  // Two different cities equally close: don't guess.
+  return new Set(best.map((c) => `${c.r.cc}:${c.r.city}`)).size === 1 ? best[0].r : null;
+}
+
+/** How a resolved city is shown back to the user ("bengaluru" → "Bengaluru"). */
+export const displayChoice = (r) => (r?.city ? r.city.replace(/\b\w/g, (c) => c.toUpperCase()) : null);
 
 /**
  * A user's search scope from their chosen locations.
