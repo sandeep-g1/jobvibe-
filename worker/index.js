@@ -150,14 +150,15 @@ async function processItem(item, browser) {
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
   if (r.status === 'needs_user') {
-    const asked = new Set(detail.asked || []);
+    // Ask whatever isn't already open in her chat. (These questions are unanswered by
+    // definition: the form engine just asked for them.) A question whose answer was
+    // removed, or whose message was lost, gets asked again.
     for (const q of r.questions) {
-      if (asked.has(q.label)) continue;
       profile = await loadProfileAsync(item.user_id); // askUser stores pending questions on the profile
-      const a = await askUser(item.user_id, profile, q.label, { context: `${job.title} at ${job.company}`, options: q.options });
-      if (a.ok) asked.add(q.label);
+      if ((profile.telegram?.pending || []).some((x) => x.q === q.label)) continue;
+      await askUser(item.user_id, profile, q.label, { context: `${job.title} at ${job.company}`, options: q.options });
     }
-    return save('needs_user', r.questions.map((q) => q.label).join(' | '), { asked: [...asked] });
+    return save('needs_user', r.questions.map((q) => q.label).join(' | '));
   }
   if (r.status === 'dry_run') {
     await notify(profile, `🧪 Dry run: filled the application for ${label} (${filled.length} answers). Not submitted.`);
