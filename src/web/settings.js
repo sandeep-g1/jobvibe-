@@ -91,6 +91,10 @@ export const FORM_CSS = `
   .kstate.ok  { background:#dcfce7; color:#166534; }
   .kstate.env { background:#e0e7ff; color:#3730a3; }
   .kstate.no  { background:#f2f4f8; color:#8a94a6; }
+  /* Keys are text inputs drawn as dots: password-type fields get autofilled by
+     the browser's password manager, which once put a login password into the
+     Gemini key box. */
+  input.secret { -webkit-text-security: disc; text-security: disc; }
   .saved { background:#dcfce7; color:#166534; border:1px solid #a7e3bf; border-radius:8px;
            padding:9px 14px; font-size:.85rem; font-weight:600; margin-bottom:14px; }
   .tag-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
@@ -172,8 +176,8 @@ export function keysCard(secrets) {
         : '<span class="kstate no">not set</span>';
     return `<div class="fld">
       <label>${esc(k.label)} ${state}</label>
-      <input type="${k.plain ? 'text' : 'password'}" name="${esc(k.key)}"
-             autocomplete="off" spellcheck="false"
+      <input type="text" name="${esc(k.key)}"${k.plain ? '' : ' class="secret"'}
+             autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore
              placeholder="${k.set ? 'Leave blank to keep the current value' : 'Paste here'}">
       ${k.help ? `<span class="help">${esc(k.help)}</span>` : ''}
     </div>`;
