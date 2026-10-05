@@ -12,7 +12,7 @@
 // only works from the chat linked to the match's owner.
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanEnv } from '../db/driver.js';
-import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus } from '../db.js';
+import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus, overrideIneligible } from '../db.js';
 
 const token = () => cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
 export const telegramConfigured = () => !!token();
@@ -273,6 +273,16 @@ async function onCallback(cb) {
     await tg('editMessageText', { chat_id: chatId, message_id: cb.message.message_id, parse_mode: 'HTML',
       text: `✅ <b>${h(pend.q)}</b>\n${h(choice)}\n<i>Saved. I'll use this from now on.</i>` });
     return answer('Saved');
+  }
+
+  // "Apply anyway" on a job the agent found the user isn't eligible for.
+  if (kind === 'ov') {
+    const owner = await profileByChat(chatId);
+    if (!owner || cb.from?.id !== chatId) return answer('This button belongs to another account.');
+    if (!(await overrideIneligible(id, owner.userId))) return answer('Already handled.');
+    await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+    await send(chatId, '👍 Okay, the agent will apply anyway and answer those questions truthfully.');
+    return answer('Will apply');
   }
 
   // Reply buttons on inbox alerts: rs = send the drafted reply, rd = user handles it.

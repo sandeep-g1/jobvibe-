@@ -375,6 +375,8 @@ const MIGRATIONS = [
   // The CV actually used for each application (tailored), for the Applications page.
   'ALTER TABLE apply_queue ADD COLUMN cv_name TEXT',
   'ALTER TABLE apply_queue ADD COLUMN cv_b64 TEXT',
+  // The employer posting an application goes to (ats:board:id), so one posting is applied to once.
+  'ALTER TABLE apply_queue ADD COLUMN dest_key TEXT',
 ];
 
 /* ------------------------------------------------------------------ */

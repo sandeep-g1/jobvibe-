@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
+  claimDestination,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv } from '../src/lib/secrets.js';
@@ -25,7 +26,7 @@ import { tailorResume } from '../src/lib/tailor.js';
 import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
-import { atsOf } from './apply/forms.js';
+import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
 
@@ -60,7 +61,7 @@ function takeLock() {
 async function loadJob(matchId) {
   const d = await db();
   const j = await d.one(
-    `SELECT m.id AS match_id, m.decision, j.id, j.title, j.company, j.country, j.jd_text, j.source, j.source_job_id,
+    `SELECT m.id AS match_id, m.decision, j.id, j.title, j.company, j.country, j.city, j.work_mode, j.location_raw, j.jd_text, j.source, j.source_job_id,
             j.apply_url, j.final_url, j.skills_required, j.apply_route, c.ats_slug
        FROM job_matches m JOIN jobs j ON j.id = m.job_id LEFT JOIN companies c ON c.id = j.company_id
       WHERE m.id = ?`, [matchId]);
@@ -125,6 +126,13 @@ async function processItem(item, browser) {
     }
   }
 
+  // One application per employer posting, even when two sources listed it.
+  if (!manualWhy) {
+    const dup = await claimDestination(item.id, item.user_id, destKey(job.url));
+    if (dup) return save('already_applied', `same posting as "${dup.title}" at ${dup.company} (${dup.status})`);
+  }
+  job.override = !!detail.override;
+
   // CV: tailored for this job when possible, else the original.
   const cvRow = await defaultResume(item.user_id);
   if (!cvRow?.content_b64) return save('blocked', 'no CV on file');
@@ -151,6 +159,14 @@ async function processItem(item, browser) {
   const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
+  if (r.status === 'ineligible') {
+    const why = r.reasons.map((x) => `• ${x.label} → <b>${h(x.answer)}</b>`).join('\n');
+    if (telegramConfigured() && profile.telegram?.chatId) {
+      await send(profile.telegram.chatId, `🚫 I didn't apply to ${label}: your truthful answers rule you out, so it would be auto-rejected.\n${why}\n\nIf you know you qualify, tap <b>Apply anyway</b>.`,
+        { buttons: [[{ text: '✅ Apply anyway', callback_data: `ov:${item.id}` }], [{ text: '🔗 View job', url: job.url }]] });
+    }
+    return save('ineligible', r.reasons.map((x) => `${x.label}: ${x.answer}`).join(' | '));
+  }
   if (r.status === 'needs_user') {
     // Ask whatever isn't already open in her chat. (These questions are unanswered by
     // definition: the form engine just asked for them.) A question whose answer was
@@ -171,7 +187,7 @@ async function processItem(item, browser) {
     await markApplied(item.fingerprint, item.user_id);
     await notify(profile, `✅ Applied to ${label}${tailored ? ' with a tailored CV' : ''}.`);
     if (r.screenshot) await notifyFile(profile, { kind: 'photo', buffer: r.screenshot, filename: 'receipt.png', caption: `Receipt: ${h(job.title)} at ${h(job.company)}` });
-    return save('submitted', null, { filled, tailored });
+    return save('submitted', null, { filled, tailored, evidence: r.evidence });
   }
   if (r.status === 'captcha') {
     await notify(profile, `🧩 Almost done: ${label} asked for a human check (CAPTCHA), which only you can do.\n<a href="${h(job.url)}">Open the application</a> and submit. Your ${tailored ? 'tailored ' : ''}CV is attached.`);

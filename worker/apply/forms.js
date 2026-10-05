@@ -23,6 +23,26 @@ export function atsOf(url) {
   } catch { return null; }
 }
 
+/**
+ * One key per employer posting, however it's linked (board page, embed, careers-site
+ * wrapper with gh_jid, /apply suffix…), so a posting found via two sources is applied to once.
+ */
+export function destKey(url) {
+  let u; try { u = new URL(url); } catch { return String(url || '').toLowerCase(); }
+  const ats = atsOf(url);
+  const p = u.pathname.replace(/\/(apply|application|c\/new)\/?$/, '').replace(/\/+$/, '');
+  const gh = u.searchParams.get('gh_jid') || u.searchParams.get('token') || p.match(/\/jobs\/(\d+)/)?.[1];
+  if (gh && (ats === 'greenhouse' || u.searchParams.get('gh_jid'))) return `greenhouse:${gh}`;
+  let m;
+  if (ats === 'lever' && (m = p.match(/^\/[^/]+\/([0-9a-f-]{36})/i))) return `lever:${m[1].toLowerCase()}`;
+  if (ats === 'ashby' && (m = p.match(/([0-9a-f-]{36})/i))) return `ashby:${m[1].toLowerCase()}`;
+  if (ats === 'workable' && (m = p.match(/\/j\/([a-z0-9]+)/i))) return `workable:${m[1].toLowerCase()}`;
+  if (ats === 'recruitee' && (m = p.match(/^\/o\/([^/]+)/))) return `recruitee:${u.hostname.split('.')[0]}:${m[1].toLowerCase()}`;
+  // Other sites: the query can identify the job (?id=123); keep it, minus tracking params.
+  const q = [...u.searchParams].filter(([n]) => !/^(utm_|ref$|source$|src$|gh_src$|lever-|fbclid|gclid)/i.test(n)).sort();
+  return `${u.hostname.replace(/^www\./, '')}${p}${q.length ? `?${new URLSearchParams(q)}` : ''}`.toLowerCase();
+}
+
 /** The URL of the application form itself for a job URL. */
 export function formUrl(url, ats) {
   const u = new URL(url);

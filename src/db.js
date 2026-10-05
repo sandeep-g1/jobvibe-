@@ -439,6 +439,32 @@ export async function updateQueueItem(id, { status, reason = null, detail = null
     attempts != null ? [status, reason, detail, now(), attempts, id] : [status, reason, detail, now(), id]);
 }
 
+/**
+ * Claim a posting for one application. If another application of this user already
+ * went (or may have gone) to the same posting, returns that one instead.
+ */
+export async function claimDestination(id, userId, key) {
+  const d = await db();
+  const other = await d.one(
+    `SELECT q.id, q.status, j.title, j.company FROM apply_queue q
+       JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? AND q.dest_key = ? AND q.id != ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'running')`,
+    [userId, key, id]);
+  if (other) return other;
+  await d.run('UPDATE apply_queue SET dest_key = ? WHERE id = ?', [key, id]);
+  return null;
+}
+
+/** "Apply anyway" on a job the agent judged the user ineligible for (owner-scoped). */
+export async function overrideIneligible(id, userId) {
+  const d = await db();
+  const row = await d.one(`SELECT id, detail FROM apply_queue WHERE id = ? AND user_id = ? AND status = 'ineligible'`, [id, userId]);
+  if (!row) return false;
+  const detail = { ...JSON.parse(row.detail || '{}'), override: true };
+  await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL, detail = ?, updated_at = ? WHERE id = ?`, [JSON.stringify(detail), now(), id]);
+  return true;
+}
+
 /** After the user answers a question, put their waiting applications back in the queue. */
 export async function requeueNeedsUser(userId) {
   const d = await db();

@@ -1,8 +1,9 @@
 // Apply to one job: read the form, answer it, fill it, then submit (or stop,
 // in dry-run). Outcomes:
+//   ineligible  a truthful answer rules the user out (work rights, location, language)
 //   needs_user  a required question only the user can answer: nothing filled
 //   dry_run     filled and checked, not submitted (testing)
-//   submitted   the site confirmed the application
+//   submitted   the site showed a new confirmation after the click (evidence kept)
 //   captcha     the site asked for a human check: handed back to the user
 //   failed      the form rejected something, or the page broke
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -12,7 +13,20 @@ import { extractFields, fillField, atsOf, formUrl, comboOptions } from './forms.
 import { answerQuestion } from '../../src/lib/answers.js';
 import { draftAnswer } from '../../src/lib/essay.js';
 
-const CONFIRM = /thank(s| you) for (applying|your (application|interest))|application (has been |was )?(received|submitted|sent)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) applied/i;
+// Matched only against text that appears after the submit click: job descriptions
+// themselves often say "Thank you for your interest in <company>".
+const CONFIRM = /thank(s| you) for (applying|your (application|interest|submission)|submitting)|application (has been |was |is )?(received|submitted|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied/i;
+
+// Questions that decide whether the user can take the job at all. A truthful "No" to one
+// of these is an automatic rejection, so the agent stops instead of applying.
+const ELIGIBILITY = /(authori[sz]ed|eligible|entitled|permitted|right|allowed) to work|legally (able to )?work|work (permit|authori[sz]ation)|fluen(t|cy)|proficien(t|cy)|native speaker|(speak|write|read)s? .{0,30}\b(english|german|dutch|french|spanish|polish|arabic|italian|portuguese)\b|(based|located|reside|residing|living|live) (in|within)|on-?site|in the office|commut|security clearance/i;
+const isNo = (v) => v === false || /^(no|n|false)\b|^i (am not|do not|don't|will not|can't|cannot)\b|^not (authori|eligible|willing|able|located|based|fluent)/i.test(String(v ?? '').trim());
+function blocksEligibility(f, r) {
+  if (!ELIGIBILITY.test(f.label) || /sponsor/i.test(f.label) || /^(voluntary|no marketing)/.test(r.source || '')) return false;
+  // A lone attestation checkbox ("I confirm I'm based in the EU") only matters when required.
+  if (f.type === 'checkbox' && (f.options?.length || 0) <= 1) return r.answer === false && f.required;
+  return isNo(r.answer);
+}
 const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
 
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
@@ -79,6 +93,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     // 1. Decide every answer before touching the page.
     const plan = [];
     const ask = [];
+    const noGo = [];
     for (const f of fields) {
       // Searchable dropdowns: read the real choices so answers pick one of them.
       if (f.type === 'combobox' && !f.options?.length) f.options = await comboOptions(page, f);
@@ -103,8 +118,11 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       }
       if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason, options: f.options || [] }); continue; }
       if (r.answer === '' || r.answer == null) continue;
+      if (blocksEligibility(f, r)) noGo.push({ label: f.label, answer: r.answer === false ? 'No' : String(r.answer) });
       plan.push({ f, value: r.answer, source: r.source });
     }
+    // Not eligible (unless the user said apply anyway): stop before asking or filling anything.
+    if (noGo.length && !job.override) return { status: 'ineligible', reasons: noGo, url };
     if (ask.length) return { status: 'needs_user', questions: ask, url };
 
     // 2. Fill.
@@ -139,13 +157,20 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     // 4. Submit and read the outcome.
     const btn = await findSubmit(page);
     if (!btn) return { status: 'failed', reason: 'could not find the submit button', url, filled, log };
+    // Baseline: what the page says before submitting. Only lines that appear afterwards count.
+    const visibleLines = () => page.evaluate(() => document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean)).catch(() => []);
+    const before = new Set(await visibleLines());
+    const urlBefore = page.url();
     await btn.click({ timeout: 15000 });
     clicked = true; // from here on, never auto-retry unless the form clearly rejected it
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);
-      const text = await page.evaluate(() => document.body.innerText).catch(() => '');
-      if (CONFIRM.test(text) || /confirmation|thank|success/i.test(page.url())) {
-        return { status: 'submitted', url, filled, screenshot: await page.screenshot({ fullPage: true }) };
+      const fresh = (await visibleLines()).filter((l) => !before.has(l));
+      const line = fresh.find((l) => CONFIRM.test(l));
+      const movedTo = page.url() !== urlBefore && /confirm|thank|success|submitted/i.test(page.url()) ? page.url() : null;
+      if (line || movedTo) {
+        const evidence = { url: page.url(), text: (line || '').slice(0, 300), at: new Date().toISOString() };
+        return { status: 'submitted', url, filled, evidence, screenshot: await page.screenshot({ fullPage: true }) };
       }
       if (await page.locator(CHALLENGE).first().isVisible().catch(() => false)) {
         return { status: 'captcha', url, filled, screenshot };

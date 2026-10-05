@@ -8,6 +8,7 @@ const STATUS = {
   captcha: ['Finish it (CAPTCHA)', 'warn'], manual: ['Apply yourself', 'muted'], waiting: ['⚡ Auto-apply soon', 'info'],
   blocked: ['Waiting on your answers', 'warn'], queued: ['Queued', 'info'], running: ['Applying…', 'info'],
   failed: ['Failed', 'bad'], skipped: ['Skipped', 'muted'], dry_run: ['Test run (not submitted)', 'muted'],
+  held: ['On hold', 'muted'], ineligible: ['Not eligible', 'muted'], already_applied: ['Already applied', 'muted'],
 };
 const EMAIL = { interview: '📅 Interview', assessment: '📝 Assessment', offer: '🎉 Offer', info_request: '📎 Info requested', rejection: 'Not selected', received: 'Received' };
 
@@ -27,10 +28,12 @@ export function applicationsPage(rows) {
       .filter(Boolean).join(', ');
     const how = route?.route === 'auto'
       ? `<span class="tag info">⚡ Auto-apply</span><div class="sub">${esc(route.via === 'job link' ? `${route.ats} form` : route.via || route.ats || '')}</div>`
+        + (route.posting ? `<div class="sub">${esc(route.posting.title)} · ${esc(route.posting.location)}</div>` : '')
       : route?.route === 'manual'
         ? `<span class="tag muted">✋ You apply</span><div class="sub">${esc(route.reason || '')}</div>`
         : '<span class="sub">—</span>';
-    const note = [det.lastEmail ? EMAIL[det.lastEmail] : '', r.reason && !['submitted'].includes(r.status) ? r.reason : '']
+    const note = [det.lastEmail ? EMAIL[det.lastEmail] : '', r.reason && !['submitted'].includes(r.status) ? r.reason : '',
+      r.status === 'submitted' && det.evidence?.text ? `Site said: “${det.evidence.text}”` : '']
       .filter(Boolean).map(esc).join('<br>');
     return `<tr>
       <td><a href="${esc(r.final_url || r.apply_url)}" target="_blank" rel="noopener"><b>${esc(r.title)}</b></a><div class="sub">${esc(r.company)}</div></td>

@@ -35,6 +35,9 @@ export async function fetchNewMail(mb) {
     host: mb.host || 'imap.gmail.com', port: 993, secure: true, logger: false,
     auth: { user: mb.email, pass: decrypt(mb.passEnc) },
   });
+  // A socket error after a failed or finished session must not crash the worker:
+  // without a listener, Node treats the emitted 'error' as fatal.
+  client.on('error', (err) => console.log(`imap ${mb.email}: ${err.code || err.message}`));
   await client.connect();
   const lock = await client.getMailboxLock('INBOX', { readOnly: true });
   const out = [];

@@ -15,7 +15,7 @@ export const COUNTRY_NAMES = {
 export const ALL_CC = Object.keys(COUNTRY_NAMES);
 
 // Words that name the country itself (in a posting's location or a user choice).
-const COUNTRY_WORDS = {
+export const COUNTRY_WORDS = {
   IN: /\b(india|bharat)\b/i,
   AE: /\b(united arab emirates|uae|u\.a\.e\.?)\b/i,
   DE: /\b(germany|deutschland)\b/i,
