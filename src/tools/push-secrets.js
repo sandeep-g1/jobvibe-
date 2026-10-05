@@ -12,7 +12,11 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT, cleanEnv } from '../db/driver.js';
-import sodiumLib from 'libsodium-wrappers';
+import { createRequire } from 'node:module';
+
+// libsodium-wrappers' ESM build imports a file it doesn't ship
+// (dist/modules-esm/libsodium.mjs); its CommonJS build works.
+const sodiumLib = createRequire(import.meta.url)('libsodium-wrappers');
 
 const args = process.argv.slice(2);
 const names = args.filter((a) => !a.startsWith('--'));
