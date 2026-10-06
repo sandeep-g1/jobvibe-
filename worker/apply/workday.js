@@ -68,6 +68,12 @@ async function challengeShown(page) {
   }), CHALLENGE_FRAME.source).catch(() => false);
 }
 
+/** What the application panel currently says (for failure reasons), without the progress bar. */
+const pageSays = (page) => page.evaluate(() => {
+  const root = document.querySelector('[data-automation-id="applyFlowPage"]') || document.body;
+  return root.innerText.replace(/(current )?step \d+ of \d+[^\n]*/gi, ' ').replace(/\s+/g, ' ').trim();
+}).catch(() => '');
+
 const bodyText = (page) => page.evaluate(() => document.body.innerText).catch(() => '');
 const visibleErrors = (page) => page.evaluate((sel) => [...document.querySelectorAll(sel)]
   .filter((e) => e.getClientRects().length).map((e) => e.innerText.trim()).filter(Boolean), ERRORS).catch(() => []);
@@ -118,16 +124,18 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   const since = new Date();
   await press(page, 'createAccountSubmitButton');
   await settle(page);
-  await createAccount(acc); // stored before anything else can go wrong: the account now exists
+  await page.waitForTimeout(2500);
 
   const errs = await visibleErrors(page);
   if (errs.some((e) => /already (exists|in use|registered)|account with this email/i.test(e))) {
     return { status: 'manual', reason: 'a Workday account with your email already exists on this site; apply there with your own password' };
   }
-  if (errs.length && await page.locator(ID('createAccountSubmitButton')).isVisible().catch(() => false)) {
-    return { status: 'failed', reason: `Workday did not create the account: ${errs.join(' | ').slice(0, 150)}` };
-  }
   if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check when creating the account' };
+  // Still on the create-account form: Workday did not accept it. Nothing is stored.
+  if (await page.locator(`${ID('verifyPassword')}:visible`).count()) {
+    return { status: 'failed', reason: `Workday did not create the account: ${(errs.join(' | ') || await pageSays(page)).slice(0, 250)}`, noRetry: true };
+  }
+  await createAccount(acc); // accepted: the account exists from here on
 
   // Some sites email a verification link before the account works.
   if (VERIFY.test(await bodyText(page))) {
@@ -371,6 +379,9 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       if (ask.length) return { status: 'needs_user', questions: [...asked, ...ask], url };
 
       const before = stepName;
+      if (!(await nextBtn.count())) {
+        return { status: 'failed', reason: `Workday page without a Next button: "${(await pageSays(page)).slice(0, 250)}"`, url, filled, log, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
+      }
       await press(page, nextBtn);
       await settle(page);
       const after = (await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
@@ -383,7 +394,10 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
     return { status: 'failed', reason: 'Workday wizard did not reach the review page', url, filled, log };
   } catch (err) {
     if (clicked) return { status: 'unconfirmed', reason: `after submitting: ${err.message.split('\n')[0]}`, url, log, clicked };
-    return { status: 'failed', reason: `Workday: ${err.message.split('\n')[0]}`, url, filled, log };
+    // Say what the page showed, and keep a picture of it, so the next fix isn't guesswork.
+    const says = (await pageSays(page)).slice(0, 200);
+    return { status: 'failed', reason: `Workday: ${err.message.split('\n')[0]}${says ? ` | page said: "${says}"` : ''}`, url, filled, log,
+      screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   } finally {
     await context.close();
   }

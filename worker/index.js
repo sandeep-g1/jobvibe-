@@ -254,7 +254,12 @@ async function processItem(item, browser) {
   }
   // failed: one retry later (only if nothing was submitted, or the form clearly rejected it), then hand it over.
   const attempts = (item.attempts || 0) + 1;
-  if (attempts < 2) return save('queued', r.reason, { lastError: r.reason }, attempts);
+  if (r.screenshot) {
+    // What the page looked like when it failed, for diagnosis.
+    const shot = join(tmpdir(), 'jobvibe-apply', `failed-${item.id}-${attempts}.png`);
+    try { writeFileSync(shot, r.screenshot); log(`${item.user_id}: failure screenshot ${shot}`); } catch { /* best effort */ }
+  }
+  if (attempts < 2 && !r.noRetry) return save('queued', r.reason, { lastError: r.reason }, attempts);
   await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself.`);
   return save('failed', r.reason, { filled }, attempts);
 }
