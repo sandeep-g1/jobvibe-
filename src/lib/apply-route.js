@@ -60,7 +60,7 @@ export const sameTitle = (a, b) => { const k = titleKey(a); return !!k && k === 
 // Regions some postings use instead of a country.
 const REGIONS = [
   [/\b(europe|european union|emea|eu)\b/i, ['DE', 'IE', 'NL', 'GB']],
-  [/\b(apac|asia)\b/i, ['IN', 'AU', 'AE']],
+  [/\b(apac|asia|asian)\b/i, ['IN', 'AU', 'AE']], // "Asia", "Asian time zones"
   [/\b(americas|north america)\b/i, ['US']],
   [/\b(middle east|mena|gcc)\b/i, ['AE']],
 ];
@@ -72,11 +72,13 @@ function placesOf(loc, remote) {
   const parts = String(loc || '').split(/;|\s\|\s|\s\/\s|\bor\b/).map((s) => s.trim()).filter(Boolean);
   if (!parts.length) return [{ cc: null, city: null, remote: !!remote, open: true }];
   return parts.map((p) => {
-    const r = resolveJob({ location: p, country: p, isRemote: remote }); // country: bare codes like "US", "IN"
+    // "Virtual", "Anywhere", "Worldwide" are remote too.
+    const isRem = remote || /\b(virtual|anywhere|worldwide|work from home|wfh)\b/i.test(p);
+    const r = resolveJob({ location: p, country: p, isRemote: isRem }); // country: bare codes like "US", "IN"
     const region = r.cc ? null : REGIONS.find(([re]) => re.test(p))?.[1] || null;
     // "Remote" with no country or region: open to anywhere (description checked separately).
     const open = !r.cc && !region && r.workMode === 'Remote'
-      && !/[a-z]{3,}/i.test(p.replace(/\b(remote|anywhere|worldwide|global|work from home|wfh|job|only|first|friendly)\b/gi, ''));
+      && !/[a-z]{3,}/i.test(p.replace(/\b(remote|virtual|anywhere|worldwide|global|work from home|wfh|job|only|first|friendly)\b/gi, ''));
     return { cc: r.cc, city: r.city, remote: r.workMode === 'Remote', region, open, raw: p };
   });
 }
