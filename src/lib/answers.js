@@ -36,6 +36,7 @@ export function defaultAnswers(profile = {}) {
     noticePeriodDays: '', servingNotice: false, lastWorkingDay: '',
     nationality: '', relocate: '', degree: '', school: '', fieldOfStudy: '', graduationYear: '',
     drivingLicense: '', languages: '',
+    relativesOrReferrals: '', // 'no': no relatives or contacts at companies applied to
     eeo: { gender: EEO_DECLINE, ethnicity: EEO_DECLINE, veteran: EEO_DECLINE, disability: EEO_DECLINE },
     consentStandard: false,
     workAuth,
@@ -449,7 +450,13 @@ export function answerQuestion(q, profile, ctx = {}) {
     const worked = co && co.length > 2 && lc(ctx.cvText || '').includes(co);
     return worked ? { needsHuman: true, reason: `your CV mentions ${ctx.company}` } : yesno(false, 'CV has no record of this employer');
   }
-  if (/referr?ed by|referral|know anyone (who works|at)|relative|family member.{0,30}(work|employ)/.test(t)) return yesno(false, 'default: no referral');
+  // Relatives / people you know at the company: a fact about the user, so only their own standing answer.
+  if (/know anyone (who works|at)|relative|family member|related to (any|an) (employee|person)/.test(t)) {
+    if (a.relativesOrReferrals === 'no') return yesno(false, 'your answer: no relatives or contacts at employers');
+    return { needsHuman: true, reason: 'relatives or contacts at this company' };
+  }
+  // Referred by an employee: the agent applied directly, so no (unless the user says otherwise).
+  if (/referr?ed by|referral/.test(t)) return yesno(false, 'applied directly, no referral');
 
   // ---- voluntary self-identification (US/UK/EU forms) ----
   const eeo = /\bgender\b|\bsex\b/.test(t) ? 'gender' : /race|ethnic/.test(t) ? 'ethnicity'

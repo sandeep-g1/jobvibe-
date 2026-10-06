@@ -26,6 +26,7 @@ import { tailorResume } from '../src/lib/tailor.js';
 import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
+import { ownDocx } from '../src/lib/docx-meta.js';
 import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
@@ -144,10 +145,13 @@ async function processItem(item, browser) {
     const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
     if (t.ok) { cv = t.buffer; tailored = true; }
   }
+  // What the employer receives: "<Name>_CV.docx", with her name in the file's properties.
+  if (ext === 'docx') cv = await ownDocx(cv, profile.name);
   const cvName = `${safe(profile.name || 'Resume')}_CV.${ext}`;
   const cvText = (await extractText(original, cvRow.filename || cvName, '')).text || '';
-  // Keep the CV used for this application so it can be downloaded later.
-  await saveQueueCv(item.id, `${safe(profile.name || 'Resume')}_${safe(job.company)}_${tailored ? 'tailored_' : ''}CV.${ext}`, cv);
+  // Keep the CV used for this application so it can be downloaded later. Her own copy is
+  // named by company so she can tell them apart; employers only ever see "<Name>_CV".
+  await saveQueueCv(item.id, `${safe(profile.name || 'Resume')}_CV_${safe(job.company)}.${ext}`, cv);
 
   if (manualWhy) {
     await notify(profile, `✋ Please apply to ${label} yourself: ${h(manualWhy)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);

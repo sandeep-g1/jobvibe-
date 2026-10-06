@@ -137,7 +137,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
         if (!d.ok) log.push(`draft failed for "${f.label.slice(0, 60)}": ${d.error}`);
         if (!d.ok) { if (f.required) ask.push({ label: f.label, reason: `couldn't draft: ${d.error}` }); continue; }
         if (f.type === 'file') {
-          const p = join(dir, 'Cover_Letter.txt'); writeFileSync(p, d.text);
+          const p = join(dir, `${safe(profile.name || 'Candidate')}_Cover_Letter.txt`); writeFileSync(p, d.text);
           plan.push({ f, value: p, source: 'AI cover letter', text: d.text });
         } else plan.push({ f, value: d.text, source: 'AI draft' });
         continue;
