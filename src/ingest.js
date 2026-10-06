@@ -14,6 +14,7 @@ import { fingerprint, isNearDuplicate } from './lib/normalize.js';
 import { resolveJob, userScope, COUNTRY_NAMES } from './lib/geo.js';
 import { extractSkills, extractExperience, extractEmploymentType } from './lib/skills.js';
 import { mapLimit } from './lib/http.js';
+import { allow, record } from './lib/quota.js';
 
 const BOARD_IDS = new Set(Object.keys(BOARD_ADAPTERS));
 const log = (m) => console.log(`  ingest · ${m}`);
@@ -85,9 +86,14 @@ export async function runIngest({ profile, profiles = [] } = {}) {
         for (const term of terms.slice(0, budget)) tasks.push({ key, adapter, term, country });
       }
     }
+    const paused = new Set();
     await mapLimit(tasks, 3, async ({ key, adapter, term, country }) => {
       try {
+        // Metered APIs keep to their monthly budget, and pause after quota/refusal errors.
+        const q = await allow(key, adapter, { term, country });
+        if (!q.ok) { if (!q.quiet && !paused.has(key)) { paused.add(key); log(`skipped ${q.why}`); } return; }
         const { rows, error } = await adapter.fetchQuery({ term, country, location: profile?.baseCity || 'India' });
+        await record(key, adapter, { term, country, error });
         if (error) errors.push(error);
         perSource[key] = (perSource[key] || 0) + rows.length;
         raw.push(...rows);

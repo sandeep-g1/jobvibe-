@@ -30,6 +30,8 @@ const HOST = 'jsearch.p.rapidapi.com';
  * for the rest of the cycle. Three searches, no retries: ~90 a month.
  */
 export const maxTermsPerRun = 3;
+/** Calls per calendar month, spread over the days (src/lib/quota.js); 20 kept back for manual checks. */
+export const monthlyBudget = 180;
 
 /**
  * Publishers whose links do not survive verification.

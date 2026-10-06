@@ -343,6 +343,18 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, uid)
   );
 
+  -- Metered job APIs (JSearch…): calls this month, pauses after quota/refusal
+  -- errors, and when each term was last searched (src/lib/quota.js).
+  CREATE TABLE IF NOT EXISTS api_usage (
+    adapter       TEXT PRIMARY KEY,
+    period        TEXT NOT NULL,
+    calls         INTEGER NOT NULL DEFAULT 0,
+    blocked_until TEXT,
+    last_error    TEXT,
+    recent        TEXT,
+    updated_at    TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',
