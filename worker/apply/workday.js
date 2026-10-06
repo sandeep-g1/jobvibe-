@@ -39,6 +39,22 @@ export function newPassword() {
   return `${body}Jv7#q`;
 }
 
+/**
+ * Click a Workday button. Several of them (Create Account, Sign In, Next…) are
+ * aria-hidden decoys with a transparent "click_filter" sibling on top that takes
+ * the real click; clicking the button itself never succeeds.
+ */
+async function press(page, target, { timeout = 15000 } = {}) {
+  const el = typeof target === 'string' ? page.locator(`${ID(target)}:visible`).first() : target;
+  await el.waitFor({ state: 'attached', timeout });
+  // Like a person: bring it into view and click its centre; whatever is on top there
+  // (its own click_filter, or the button itself) gets the click.
+  await el.scrollIntoViewIfNeeded({ timeout }).catch(() => {});
+  const box = await el.boundingBox();
+  if (box && box.width && box.height) { await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2); return; }
+  await el.click({ timeout });
+}
+
 async function settle(page) {
   await page.locator(ID('applyFlowLoadingPage')).waitFor({ state: 'detached', timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1500);
@@ -61,7 +77,7 @@ const visibleErrors = (page) => page.evaluate((sel) => [...document.querySelecto
 async function signIn(page, acc) {
   await page.locator(ID('email')).first().fill(acc.email);
   await page.locator(ID('password')).first().fill(acc.password);
-  await page.locator(ID('signInSubmitButton')).first().click();
+  await press(page, 'signInSubmitButton');
   await settle(page);
 }
 
@@ -75,7 +91,7 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
     emailBtn.waitFor({ timeout: 45000 }),
     page.locator(ID('email')).first().waitFor({ timeout: 45000 }),
   ]).catch(() => {});
-  if (await emailBtn.isVisible().catch(() => false)) { await emailBtn.click(); await page.waitForTimeout(1500); }
+  if (await emailBtn.isVisible().catch(() => false)) { await press(page, 'SignInWithEmailButton'); await page.waitForTimeout(1500); }
   if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check at sign-in' };
 
   if (account) {
@@ -91,7 +107,7 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   const email = profile.mailbox?.email;
   if (!email) return { status: 'manual', reason: 'Workday needs your job-hunt mailbox connected (for the account and its emails)' };
   if (!profile.answers?.consentStandard) return { status: 'needs_user', questions: [{ label: 'Workday account: allow the agent to accept the employer\'s data-privacy notice?', reason: 'consent box', options: ['Yes', 'No'] }] };
-  await page.locator(ID('createAccountLink')).first().click();
+  await press(page, 'createAccountLink');
   await page.locator(ID('verifyPassword')).first().waitFor({ timeout: 15000 });
   const acc = { email, password: newPassword() };
   await page.locator(ID('email')).first().fill(acc.email);
@@ -100,7 +116,7 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   const box = page.locator(ID('createAccountCheckbox')).first();
   if (await box.count() && !(await box.isChecked().catch(() => false))) await box.check({ force: true });
   const since = new Date();
-  await page.locator(ID('createAccountSubmitButton')).first().click();
+  await press(page, 'createAccountSubmitButton');
   await settle(page);
   await createAccount(acc); // stored before anything else can go wrong: the account now exists
 
@@ -279,10 +295,10 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       await page.locator(ID('legalNoticeDeclineButton')).first().click({ timeout: 2000 }).catch(() => {});
       const text = await bodyText(page);
       if (/(job|posting) (is )?no longer available|page (you are looking for )?(doesn't|does not) exist/i.test(text)) return { status: 'closed', reason: 'the employer has closed this job', url };
-      await page.locator(ID('adventureButton')).first().click({ timeout: 20000 });
+      await press(page, 'adventureButton', { timeout: 20000 });
       const how = page.locator(`${ID('autofillWithResume')}, ${ID('applyManually')}`).first();
       await how.waitFor({ timeout: 15000 }).catch(() => {});
-      if (await how.count()) await how.click();
+      if (await how.count()) await press(page, how);
       await settle(page);
       if (ALREADY.test(await bodyText(page))) return { status: 'already_applied', reason: 'Workday says you already applied to this job', url };
       const r = await enter(page, { account, profile, createAccount, getVerifyLink });
@@ -298,7 +314,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check', url, filled };
       const stepName = (await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
       if (ALREADY.test(await bodyText(page))) return { status: 'already_applied', reason: 'Workday says you already applied to this job', url };
-      const nextBtn = page.locator(NEXT).first();
+      const nextBtn = page.locator(NEXT).filter({ visible: true }).first();
       const nextText = (await nextBtn.innerText().catch(() => '')).trim();
       const isReview = /review/i.test(stepName) || /^submit$/i.test(nextText);
 
@@ -306,7 +322,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         const screenshot = await page.screenshot({ fullPage: true });
         if (dryRun) return { status: 'dry_run', url, filled, screenshot, log };
         const before = new Set((await bodyText(page)).split('\n').map((s) => s.trim()).filter(Boolean));
-        await nextBtn.click();
+        await press(page, nextBtn);
         clicked = true;
         for (let i = 0; i < 30; i++) {
           await page.waitForTimeout(1000);
@@ -355,7 +371,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       if (ask.length) return { status: 'needs_user', questions: [...asked, ...ask], url };
 
       const before = stepName;
-      await nextBtn.click({ timeout: 15000 });
+      await press(page, nextBtn);
       await settle(page);
       const after = (await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
       if (after === before) {
