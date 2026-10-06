@@ -320,7 +320,7 @@ const APP_STATUS = {
   needs_user: ['Needs you', 'chip-r'], captcha: ['Finish it (CAPTCHA)', 'chip-r'], manual: ['Apply yourself', 'chip-n'],
   blocked: ['Waiting on your answers', 'chip-r'], waiting: ['⚡ Auto-apply soon', 'chip'], failed: ['Failed', 'chip-r'], skipped: ['Skipped', 'chip-n'], dry_run: ['Test run', 'chip-n'],
   unconfirmed: ['Submitted, not confirmed', 'chip-r'], held: ['On hold', 'chip-n'], ineligible: ['Not eligible', 'chip-n'],
-  already_applied: ['Already applied', 'chip-n'], closed: ['Job closed', 'chip-n'],
+  already_applied: ['Already applied', 'chip-n'], closed: ['Job closed', 'chip-n'], email_code: ['Needs email code', 'chip-r'],
 };
 
 /** A skill in the bank, with a remove (−) button. */

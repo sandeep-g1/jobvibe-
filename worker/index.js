@@ -163,6 +163,11 @@ async function processItem(item, browser) {
   const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
+  if (r.status === 'email_code') {
+    // Greenhouse emailed her a security code and holds the application until it's entered.
+    await notify(profile, `✉️ ${label}: the site emailed you a security code to finish the application, so it is <b>not submitted yet</b>. I won't retry it on my own.\n<a href="${h(job.url)}">Open the application</a>`);
+    return save('email_code', 'not submitted: the site asked for the security code it emailed you', { filled, tailored });
+  }
   if (r.status === 'closed') {
     // Taken down: no retry, and the job leaves the pool so it isn't offered again.
     await (await db()).run(`UPDATE jobs SET link_status = 'DEAD', link_checked_at = ? WHERE id = ?`, [new Date().toISOString(), job.id]);

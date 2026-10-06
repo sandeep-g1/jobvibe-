@@ -45,7 +45,22 @@ function sameMeaning(a, b) {
   const cx = resolveChoice(x.split(',')[0]), cy = resolveChoice(y.split(',')[0]);
   return !!(cx?.city && cy?.city && cx.city === cy.city);
 }
-const PARSING =/analy[sz]ing (your )?(resume|cv)|parsing (your )?(resume|cv)|reading your (resume|cv)/i;
+// After Submit, Greenhouse may email a code to the applicant and wait for it.
+const EMAIL_CODE = /(security|verification|confirmation) code|enter the (\d+[- ]character )?code|we('ve| have) (just )?(sent|emailed) (you )?(a|an|the) .{0,30}code/i;
+/** Error messages a person would actually see right now. */
+const visibleErrors = (page) => page.evaluate(() => [...document.querySelectorAll('[class*="error" i], [role="alert"], .invalid-feedback')]
+  .filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')
+  .map((e) => e.innerText.trim()).filter(Boolean)).catch(() => []);
+/** A bot check that wants a person: a known challenge frame, or any large visible CAPTCHA frame. */
+async function challengeShown(page) {
+  if (await page.locator(CHALLENGE).first().isVisible().catch(() => false)) return true;
+  return page.evaluate(() => [...document.querySelectorAll('iframe')].some((f) => {
+    if (!/captcha|challenges\.cloudflare/i.test(f.src)) return false;
+    const r = f.getBoundingClientRect();
+    return r.height > 120 && r.width > 120 && getComputedStyle(f).visibility !== 'hidden';
+  })).catch(() => false);
+}
+const PARSING = /analy[sz]ing (your )?(resume|cv)|parsing (your )?(resume|cv)|reading your (resume|cv)/i;
 const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
 
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
@@ -199,6 +214,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const visibleLines = () => page.evaluate(() => document.body.innerText.split('\n').map((s) => s.trim()).filter(Boolean)).catch(() => []);
     const before = new Set(await visibleLines());
     const urlBefore = page.url();
+    const errorsBefore = new Set(await visibleErrors(page));
     await btn.click({ timeout: 15000 });
     clicked = true; // from here on, never auto-retry unless the form clearly rejected it
     for (let i = 0; i < 25; i++) {
@@ -210,12 +226,16 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
         const evidence = { url: page.url(), text: (line || '').slice(0, 300), at: new Date().toISOString() };
         return { status: 'submitted', url, filled, evidence, screenshot: await page.screenshot({ fullPage: true }) };
       }
-      if (await page.locator(CHALLENGE).first().isVisible().catch(() => false)) {
-        return { status: 'captcha', url, filled, screenshot };
+      if (await challengeShown(page)) {
+        return { status: 'captcha', url, filled, screenshot: await page.screenshot({ fullPage: true }).catch(() => screenshot) };
       }
+      // Greenhouse emails the applicant a security code and waits for it: not submitted yet.
+      const code = fresh.find((l) => EMAIL_CODE.test(l));
+      if (code) return { status: 'email_code', reason: code.slice(0, 200), url, filled, log, clicked };
     }
-    const errors = await page.evaluate(() => [...document.querySelectorAll('[class*="error" i], [role="alert"], .invalid-feedback')]
-      .map((e) => e.innerText.trim()).filter(Boolean).slice(0, 5));
+    // Only errors that became visible after the click: forms carry hidden error templates
+    // ("File exceeds the maximum upload size…") from the moment they load.
+    const errors = (await visibleErrors(page)).filter((e) => !errorsBefore.has(e)).slice(0, 5);
     // The form showed errors: nothing was accepted, safe to fix and retry.
     if (errors.length) return { status: 'failed', reason: `form said: ${errors.join(' | ')}`, url, filled, log, clicked, rejected: true };
     // Clicked but no confirmation and no errors: it may have gone through. Never resend blindly.

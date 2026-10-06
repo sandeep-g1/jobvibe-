@@ -8,7 +8,7 @@ const STATUS = {
   captcha: ['Finish it (CAPTCHA)', 'warn'], manual: ['Apply yourself', 'muted'], waiting: ['⚡ Auto-apply soon', 'info'],
   blocked: ['Waiting on your answers', 'warn'], queued: ['Queued', 'info'], running: ['Applying…', 'info'],
   failed: ['Failed', 'bad'], skipped: ['Skipped', 'muted'], dry_run: ['Test run (not submitted)', 'muted'],
-  held: ['On hold', 'muted'], ineligible: ['Not eligible', 'muted'], already_applied: ['Already applied', 'muted'], closed: ['Job closed', 'muted'],
+  held: ['On hold', 'muted'], ineligible: ['Not eligible', 'muted'], already_applied: ['Already applied', 'muted'], closed: ['Job closed', 'muted'], email_code: ['Needs email code (not sent)', 'warn'],
 };
 const EMAIL = { interview: '📅 Interview', assessment: '📝 Assessment', offer: '🎉 Offer', info_request: '📎 Info requested', rejection: 'Not selected', received: 'Received' };
 
