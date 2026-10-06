@@ -286,6 +286,19 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/^(full |legal )?name\b/.test(t)) return text(profile.name, 'name', 'name');
   // Only a short label is the email field ("you'll write to clients via email…" is an essay).
   if (/e-?mail/.test(t) && t.length <= 45 && !/confirm|marketing|newsletter/.test(t)) return text(a.email, 'email', 'email');
+  // Phone kind and dialing code (Workday and others ask these beside the number).
+  if (/phone (device )?type|type of phone|device type/.test(t)) {
+    const o = isChoice ? opts.find((x) => /mobile|cell/i.test(x)) : 'Mobile';
+    return o ? { answer: o, source: 'phone' } : { needsHuman: true, reason: 'phone type options' };
+  }
+  if (/country phone code|phone country( code)?|country code|dialing code|calling code/.test(t)) {
+    const dial = { IN: '+91', AE: '+971', DE: '+49', IE: '+353', NL: '+31', AU: '+61', US: '+1', GB: '+44' }[(resolveChoice(profile.baseCity) || {}).cc];
+    const name = COUNTRY_NAMES[(resolveChoice(profile.baseCity) || {}).cc];
+    if (!dial) return { needsHuman: true, reason: 'phone country code' };
+    if (!isChoice) return { answer: dial, source: 'your city' };
+    const o = opts.find((x) => x.includes(`(${dial})`) || x.includes(dial) && new RegExp(`\\b${name}\\b`, 'i').test(x)) || opts.find((x) => new RegExp(`^${name}\\b`, 'i').test(x));
+    return o ? { answer: o, source: 'your city' } : { needsHuman: true, reason: 'phone country code options' };
+  }
   if (/phone|mobile|contact number/.test(t)) return text(a.phone, 'phone', 'phone');
   if (/linkedin/.test(t)) return text(String(a.linkedin || '').replace(/[?#].*$/, ''), 'linkedin', 'LinkedIn URL'); // no tracking tail (?isSelf…)
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
@@ -343,6 +356,8 @@ export function answerQuestion(q, profile, ctx = {}) {
   const city = profile.baseCity ? String(profile.baseCity).replace(/\b\w/g, (c) => c.toUpperCase()) : '';
   if (/home address|street address|postal address|\bzip\b|pin ?code|postcode/.test(t)) return { needsHuman: true, reason: 'full address' };
   if (/country of residence|country (do )?you (currently )?(live|reside)|current country|^country\b|country (in which|where) you (are|currently) (located|based|reside)|choose the country/.test(t)) return text(homeCountry, 'your city', 'base city');
+  // A bare "City" field (address forms such as Workday's): just the city.
+  if (/^(town ?\/ ?)?city( ?\/ ?town)?$/.test(t.trim())) return text(city, 'your city', 'base city');
   if (/^location\b|current location|where are you (currently )?(based|located)|city of residence|current city|which city/.test(t) && !/prefer/.test(t)) {
     return text(city && homeCountry ? city + ', ' + homeCountry : '', 'your city', 'base city');
   }

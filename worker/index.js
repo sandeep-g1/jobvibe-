@@ -16,10 +16,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
-  claimDestination,
+  claimDestination, saveProfileRow,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
-import { loadSecretsIntoEnv } from '../src/lib/secrets.js';
+import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
 import { loadProfileAsync } from '../src/lib/profile.js';
 import { answerBankStatus } from '../src/lib/answers.js';
 import { tailorResume } from '../src/lib/tailor.js';
@@ -27,7 +27,8 @@ import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
 import { ownDocx } from '../src/lib/docx-meta.js';
-import { waitForEmailCode } from './mailcode.js';
+import { waitForEmailCode, waitForVerifyLink } from './mailcode.js';
+import { applyWorkday, siteKey } from './apply/workday.js';
 import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
@@ -39,7 +40,7 @@ const argv = process.argv.slice(2);
 const ONCE = argv.includes('--once');
 const DRY = argv.includes('--dry-run');
 const HEADED = argv.includes('--headed');
-const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby', 'recruitee']);
+const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby', 'recruitee', 'workday']);
 const DEFAULT_DAILY_CAP = 10;
 const LOCK = join(tmpdir(), 'jobvibe-worker.lock');
 const log = (m) => console.log(`${new Date().toISOString().slice(11, 19)} ${m}`);
@@ -82,6 +83,30 @@ const notify = async (profile, html) => {
 const notifyFile = async (profile, file) => {
   if (telegramConfigured() && profile.telegram?.chatId) await sendFile(profile.telegram.chatId, file);
 };
+
+/* ---------------- Workday accounts ---------------- */
+// One candidate account per employer's Workday site, on her job-hunt email, with a
+// generated password stored encrypted on her profile (profile.workdayAccounts[site]).
+function workdayAccount(userId, profile, url) {
+  const key = siteKey(url);
+  const stored = profile.workdayAccounts?.[key];
+  let account = null;
+  try { if (stored?.passEnc) account = { email: stored.email, password: decrypt(stored.passEnc) }; } catch { /* unreadable: treated as none */ }
+  return {
+    account,
+    createAccount: async (acc) => {
+      const p = await loadProfileAsync(userId);
+      const next = { ...p, userId, workdayAccounts: { ...(p.workdayAccounts || {}),
+        [key]: { email: acc.email, passEnc: encrypt(acc.password), createdAt: stored?.createdAt || new Date().toISOString(), verified: !!acc.verified } } };
+      delete next._source; delete next._updatedAt;
+      await saveProfileRow(next, userId);
+      log(`${userId}: Workday account ${acc.verified ? 'verified' : 'created'} on ${key}`);
+      // She should know an account exists in her name (she can use "Forgot password" there to sign in herself).
+      if (!stored && !acc.verified) await notify(profile, `🔐 I created a Workday candidate account for you on <b>${h(new URL(url).hostname)}</b> with ${h(acc.email)}, to apply there. The password is stored encrypted; use "Forgot password" on that site if you ever want to sign in yourself.`);
+    },
+    getVerifyLink: (since) => waitForVerifyLink(profile.mailbox, { since, host: new URL(url).hostname }),
+  };
+}
 
 /* ---------------- one queue item ---------------- */
 async function processItem(item, browser) {
@@ -163,9 +188,18 @@ async function processItem(item, browser) {
   log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);
   // A form that emails a security code after Submit: read it from her connected job-hunt inbox.
   const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
-  const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
+  const r = ats === 'workday'
+    ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, ...workdayAccount(item.user_id, profile, job.url) })
+    : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
+  if (r.status === 'manual') {
+    await notify(profile, `✋ Please apply to ${label} yourself: ${h(r.reason)}.
+<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
+    await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
+    return save('manual', r.reason);
+  }
+  if (r.status === 'already_applied') return save('already_applied', r.reason);
   if (r.status === 'email_code') {
     // Greenhouse emailed her a security code and holds the application until it's entered.
     await notify(profile, `✉️ ${label}: the site emailed you a security code to finish the application, so it is <b>not submitted yet</b>. I won't retry it on my own.\n<a href="${h(job.url)}">Open the application</a>`);

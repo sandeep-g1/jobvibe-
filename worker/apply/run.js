@@ -17,7 +17,7 @@ import { resolveChoice } from '../../src/lib/geo.js';
 
 // Matched only against text that appears after the submit click: job descriptions
 // themselves often say "Thank you for your interest in <company>".
-const CONFIRM = /thank(s| you) for (applying|your (application|interest|submission)|submitting)|application (has been |was |is )?(received|submitted|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied/i;
+export const CONFIRM = /thank(s| you) for (applying|your (application|interest|submission)|submitting)|application (has been |was |is )?(received|submitted|sent|complete)|we('ve| have) received your application|successfully (applied|submitted)|you('ve| have) (successfully )?applied/i;
 
 // Questions that decide whether the user can take the job at all. A truthful "No" to one
 // of these is an automatic rejection, so the agent stops instead of applying.

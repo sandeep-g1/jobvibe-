@@ -17,14 +17,16 @@ import { resolveJob, COUNTRY_WORDS } from './geo.js';
 // SmartRecruiters is not here: its application form sits behind DataDome bot
 // protection, which blocks automated browsers. We don't work around bot checks,
 // so SmartRecruiters jobs are "you apply".
-export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'recruitee'];
+// Workday: one candidate account per employer, created by the agent on the user's job-hunt email.
+export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'recruitee', 'workday'];
 const BOT_PROTECTED = new Set(['smartrecruiters']);
 const CACHE_DAYS = 7;
-const ROUTE_V = 2; // v2: exact posting + location (v1 matched titles loosely)
+const ROUTE_V = 3; // v2: exact posting + location (v1 matched titles loosely); v3: Workday is auto
 
 const HOSTS = {
   greenhouse: /(^|\.)greenhouse\.io$/, lever: /(^|\.)lever\.co$/, ashby: /(^|\.)ashbyhq\.com$/,
   smartrecruiters: /(^|\.)smartrecruiters\.com$/, workable: /(^|\.)workable\.com$/, recruitee: /(^|\.)recruitee\.com$/,
+  workday: /(^|\.)myworkdayjobs\.com$/,
 };
 export function atsOfUrl(url) {
   try { const h = new URL(url).hostname; return Object.entries(HOSTS).find(([, re]) => re.test(h))?.[0] || null; } catch { return null; }
