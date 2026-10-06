@@ -7,12 +7,17 @@ export const id = 'careerjet';
 export const label = 'Careerjet';
 export const kind = 'query';
 export const trustLink = true;
+/** The site registered with Careerjet for this affiliate id (it checks the referrer). */
+const SITE = 'https://jobvibe.evergreenskill.com';
 
 export function configured() {
   return hasKey('careerjet');
 }
 
 export const setupUrl = 'https://www.careerjet.com/partners/';
+
+/** Conservative monthly call budget (src/lib/quota.js spreads it over the month; a 429 pauses it). */
+export const monthlyBudget = 900;
 
 export async function fetchQuery({ term, location = 'India', perPage = 50 }) {
   const k = keys().careerjet;
@@ -24,13 +29,14 @@ export async function fetchQuery({ term, location = 'India', perPage = 50 }) {
     pagesize: String(perPage),
     page: '1',
     sort: 'date',
-    // The API requires these to attribute the request.
+    // The API requires these to attribute the request; the page is the site registered with Careerjet.
     user_ip: '127.0.0.1',
-    user_agent: 'Mozilla/5.0',
-    url: 'http://localhost/',
+    user_agent: 'Mozilla/5.0 (compatible; JobVibe/1.0)',
+    url: `${SITE}/`,
   });
 
-  const res = await getJSON(`http://public.api.careerjet.net/search?${q}`, { timeout: 25000 });
+  // Without a Referer the API answers 403 "Undeclared referrer".
+  const res = await getJSON(`http://public.api.careerjet.net/search?${q}`, { timeout: 25000, headers: { Referer: `${SITE}/` } });
   if (!res.ok || res.data?.type !== 'JOBS' || !Array.isArray(res.data?.jobs)) {
     return { rows: [], error: `careerjet status=${res.status} type=${res.data?.type || '?'}` };
   }

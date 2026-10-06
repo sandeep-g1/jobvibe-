@@ -14,6 +14,9 @@ export function configured() {
 
 export const setupUrl = 'https://jooble.org/api/about';
 
+/** Conservative monthly call budget (src/lib/quota.js spreads it over the month; a 429 pauses it). */
+export const monthlyBudget = 500;
+
 export async function fetchQuery({ term, location = 'India', page = 1 }) {
   const k = keys().jooble;
   const ac = new AbortController();
@@ -25,7 +28,9 @@ export async function fetchQuery({ term, location = 'India', page = 1 }) {
       method: 'POST',
       signal: ac.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keywords: term, location, page: String(page) }),
+      // Jooble's API matches India only as "India" (or "<city>, India"); a bare city
+      // ("bengaluru", "Bangalore, Karnataka") returns nothing.
+      body: JSON.stringify({ keywords: term, location: /india/i.test(location) ? location : `${location}, India`, page: String(page) }),
     });
     clearTimeout(timer);
     if (!res.ok) return { rows: [], error: `jooble status=${res.status}` };
