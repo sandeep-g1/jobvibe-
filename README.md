@@ -176,6 +176,24 @@ not been executed against a live key** — I could not verify them without your 
 Expect to shake out a field mapping or two on first run; `npm run stats` will show any
 source warnings.
 
+## Apply worker (always on, Windows)
+
+The worker in `worker/` fills and submits approved applications with a real browser,
+so it runs on your PC, not on Vercel. Set it up once:
+
+1. `npm --prefix worker ci` (installs Playwright), and keep `.env` with `DATABASE_URL` and `APP_PASSWORD` in the repo folder.
+2. Double-click `worker\install-autostart.cmd`.
+
+From then on it starts hidden whenever you sign in to Windows, restarts itself 30 s after a
+crash, and logs to `%LOCALAPPDATA%\JobVibe\worker.log`. JobVibe → Applications shows whether it
+is running. There, a failed application has **Test run** (fill everything, stop before
+submitting, screenshot on Telegram) and **Try again**; a test run has **Submit for real**.
+An application the worker was in the middle of when the PC shut down is marked
+"unconfirmed" and never resent. `worker\uninstall-autostart.cmd` turns it off;
+`worker\start-worker.cmd` still runs it in a visible window.
+
+The PC must be on and signed in (not asleep) for applications to go out.
+
 ## Known limits in Phase 1
 
 - **Tier A is unproven until you add keys.** See above. Without them, coverage is open

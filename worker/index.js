@@ -13,10 +13,10 @@
 import { createRequire } from 'node:module';
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
-  claimDestination, saveProfileRow,
+  claimDestination, saveProfileRow, workerBeat,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
@@ -185,12 +185,14 @@ async function processItem(item, browser) {
     return save('manual', manualWhy);
   }
 
-  log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);
+  // A test run asked for from the Applications page: fill everything, stop before submitting.
+  const dryRun = DRY || !!detail.testRun;
+  log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${dryRun ? ' [dry run]' : ''}`);
   // A form that emails a security code after Submit: read it from her connected job-hunt inbox.
   const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
   const r = ats === 'workday'
-    ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, ...workdayAccount(item.user_id, profile, job.url) })
-    : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
+    ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun, ...workdayAccount(item.user_id, profile, job.url) })
+    : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun, getEmailCode });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
   if (r.status === 'manual') {
@@ -231,7 +233,8 @@ async function processItem(item, browser) {
     return save('needs_user', r.questions.map((q) => q.label).join(' | '));
   }
   if (r.status === 'dry_run') {
-    await notify(profile, `🧪 Dry run: filled the application for ${label} (${filled.length} answers). Not submitted.`);
+    await notify(profile, `🧪 Dry run: filled the application for ${label} (${filled.length} answers). Not submitted.`
+      + (detail.testRun ? '\nCheck the screenshot. If it looks right, tap <b>Submit for real</b> on JobVibe → Applications.' : ''));
     if (r.screenshot) await notifyFile(profile, { kind: 'photo', buffer: r.screenshot, filename: 'filled.png', caption: `Filled form: ${h(job.title)}` });
     return save('dry_run', null, { filled });
   }
@@ -260,7 +263,8 @@ async function processItem(item, browser) {
     try { writeFileSync(shot, r.screenshot); log(`${item.user_id}: failure screenshot ${shot}`); } catch { /* best effort */ }
   }
   if (attempts < 2 && !r.noRetry) return save('queued', r.reason, { lastError: r.reason }, attempts);
-  await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself.`);
+  await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself, or tap <b>Try again</b> on JobVibe → Applications.`);
+  if (r.screenshot) await notifyFile(profile, { kind: 'photo', buffer: r.screenshot, filename: 'failed.png', caption: `Where it stopped: ${h(job.title)}` });
   return save('failed', r.reason, { filled }, attempts);
 }
 
@@ -314,19 +318,43 @@ async function tick(browser) {
 }
 
 async function main() {
-  if (!takeLock()) { console.log('Another worker is already running.'); return; }
+  // Exit code 3 tells run-forever.cmd not to restart: the other worker already covers it.
+  if (!takeLock()) { console.log('Another worker is already running.'); process.exitCode = 3; return; }
   await initDB();
   await loadSecretsIntoEnv();
+  // An application this worker was in the middle of when it stopped (PC shut down, crash).
+  // It may have been submitted, so it is never resent: she checks her email instead.
+  {
+    const d = await db();
+    const stuck = await d.query(`SELECT id FROM apply_queue WHERE status = 'running'`);
+    for (const r of stuck) {
+      await d.run(`UPDATE apply_queue SET status = 'unconfirmed', reason = ?, updated_at = ? WHERE id = ?`,
+        ['the worker stopped in the middle of this application; check your email to see whether it went through', new Date().toISOString(), r.id]);
+    }
+    if (stuck.length) log(`${stuck.length} application(s) interrupted last time marked unconfirmed`);
+  }
   // Going live after test runs: jobs that were only test-filled get applied to for real.
   if (!DRY) {
     const d = await db();
-    const n = (await d.query(`SELECT id FROM apply_queue WHERE status = 'dry_run'`)).length;
-    if (n) { await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL WHERE status = 'dry_run'`); log(`${n} test-run job(s) queued to apply for real`); }
+    // (Not the ones she test-ran from the Applications page: those wait for her "Submit for real".)
+    const ids = (await d.query(`SELECT id, detail FROM apply_queue WHERE status = 'dry_run'`))
+      .filter((r) => { try { return !JSON.parse(r.detail || '{}').testRun; } catch { return true; } }).map((r) => r.id);
+    for (const id of ids) await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL WHERE id = ?`, [id]);
+    if (ids.length) log(`${ids.length} test-run job(s) queued to apply for real`);
   }
-  const browser = await chromium.launch({ headless: !HEADED });
+  let browser = await chromium.launch({ headless: !HEADED });
   log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}`);
-  if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
+  const me = { host: hostname(), pid: process.pid, mode: DRY ? 'dry-run' : 'live', startedAt: new Date().toISOString() };
+  const beat = (note) => workerBeat({ ...me, note }).catch((err) => log(`heartbeat failed: ${err.message}`));
+  await beat('started');
+  if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); await beat('stopped'); return; }
   for (;;) {
+    // Days of uptime: a browser that died (sleep, crash) is replaced instead of failing every job.
+    if (!browser.isConnected()) {
+      log('browser was gone, starting a new one');
+      browser = await chromium.launch({ headless: !HEADED });
+    }
+    await beat('idle');
     try { await inboxTick(); } catch (err) { log(`inbox tick failed: ${err.message}`); }
     try { await tick(browser); } catch (err) { log(`tick failed: ${err.message}`); }
     // 60-120 s between applications so employers aren't hit in bursts.

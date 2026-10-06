@@ -14,7 +14,38 @@ const EMAIL = { interview: '📅 Interview', assessment: '📝 Assessment', offe
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
-export function applicationsPage(rows) {
+const ago = (iso) => {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+};
+
+// Online if it checked in recently: the loop beats every 1-2 minutes, and one application can take several.
+function workerBanner(w) {
+  if (!w) {
+    return `<div class="wk off"><b>Apply worker: never run.</b> Approved jobs wait until it runs on your PC.
+      Double-click <code>worker\\install-autostart.cmd</code> once and it starts by itself every time you sign in to Windows.</div>`;
+  }
+  const fresh = Date.now() - new Date(w.seen_at).getTime() < 10 * 60000 && w.note !== 'stopped';
+  return fresh
+    ? `<div class="wk on"><b>● Apply worker running</b> on ${esc(w.host)}${w.mode === 'dry-run' ? ' (test mode: nothing is submitted)' : ''} · checked in ${esc(ago(w.seen_at))}</div>`
+    : `<div class="wk off"><b>○ Apply worker offline</b> since ${esc(ago(w.seen_at))} (${esc(w.host)}). Approved jobs wait until the PC is on and you are signed in.</div>`;
+}
+
+const MSG = {
+  queued: 'Sent to the worker. It picks it up within two minutes while it is running.',
+  test: 'Test run queued: the worker fills the form, stops before submitting, and sends you a screenshot on Telegram.',
+};
+
+function actions(r) {
+  const btn = (mode, text, cls = '') => `<form method="post" action="/applications/${r.id}/retry" style="display:inline">
+    <input type="hidden" name="mode" value="${mode}"><button class="act ${cls}">${text}</button></form>`;
+  if (r.status === 'failed') return `<div class="acts">${btn('test', 'Test run')}${btn('real', 'Try again', 'go')}</div>`;
+  let det = {}; try { det = JSON.parse(r.detail || '{}'); } catch { /* none */ }
+  if (r.status === 'dry_run' && det.testRun) return `<div class="acts">${btn('real', 'Submit for real', 'go')}</div>`;
+  return '';
+}
+
+export function applicationsPage(rows, { worker = null, msg = null } = {}) {
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
   const chips = Object.entries(counts).sort((a, b) => b[1] - a[1])
@@ -40,7 +71,7 @@ export function applicationsPage(rows) {
       <td>${esc(place) || '—'}</td>
       <td>${r.score != null ? `${Math.round(r.score)}%` : '—'}</td>
       <td>${how}</td>
-      <td><span class="tag ${cls}">${esc(label)}</span>${r.attempts > 1 ? `<div class="sub">${r.attempts} attempts</div>` : ''}</td>
+      <td><span class="tag ${cls}">${esc(label)}</span>${r.attempts > 1 ? `<div class="sub">${r.attempts} attempts</div>` : ''}${actions(r)}</td>
       <td class="note">${note || '<span class="sub">—</span>'}</td>
       <td>${r.has_cv ? `<a class="dl" href="/applications/${r.id}/cv">⬇ ${esc(r.cv_name || 'CV')}</a>` : '<span class="sub">—</span>'}</td>
       <td class="sub">${esc(when(r.updated_at))}</td>
@@ -57,6 +88,8 @@ export function applicationsPage(rows) {
   <div class="hero-chips">${chips || '<span class="hero-chip">none yet</span>'}</div>
 </div>
 <div class="wrap">
+  ${workerBanner(worker)}
+  ${msg ? `<div class="wk ${MSG[msg] ? 'on' : 'off'}">${esc(MSG[msg] || msg)}</div>` : ''}
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="apps">
       <thead><tr><th>Job</th><th>Location</th><th>Match</th><th>How it applies</th><th>Status</th><th>Details</th><th>CV sent</th><th>Updated</th></tr></thead>
@@ -75,6 +108,12 @@ export function applicationsPage(rows) {
   .tag { display:inline-block; padding:3px 9px; border-radius:10px; font-size:.74rem; font-weight:700; white-space:nowrap; }
   .tag.ok { background:#dcfce7; color:#15803d; } .tag.warn { background:#fef3c7; color:#92400e; } .tag.bad { background:#fee2e2; color:#b91c1c; }
   .tag.info { background:#eef4fc; color:#0a66c2; } .tag.muted { background:#f2f4f8; color:#667085; }
+  .wk { padding:10px 14px; border-radius:10px; font-size:.85rem; margin-bottom:12px; }
+  .wk.on { background:#ecfdf3; color:#166534; } .wk.off { background:#fff7ed; color:#9a3412; }
+  .wk code { background:rgba(0,0,0,.06); padding:1px 5px; border-radius:4px; }
+  .acts { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+  .act { font:inherit; font-size:.74rem; font-weight:600; padding:4px 10px; border-radius:8px; border:1px solid #d0d5dd; background:#fff; color:#344054; cursor:pointer; }
+  .act.go { background:#0a66c2; border-color:#0a66c2; color:#fff; }
   .dl { font-size:.78rem; font-weight:600; white-space:nowrap; }
 </style>`,
   });

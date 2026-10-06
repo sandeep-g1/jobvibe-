@@ -355,6 +355,16 @@ const TABLES = (pk, json) => `
     updated_at    TEXT NOT NULL
   );
 
+  -- The apply worker's heartbeat (one row per machine), so the app can say whether it is running.
+  CREATE TABLE IF NOT EXISTS worker_status (
+    host       TEXT PRIMARY KEY,
+    pid        INTEGER,
+    mode       TEXT,
+    started_at TEXT,
+    seen_at    TEXT NOT NULL,
+    note       TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, queueCv,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, queueCv, retryQueueItem, workerStatus,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -417,7 +417,16 @@ export async function handler(req, res) {
     }
 
     if (path === '/applications') {
-      return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid)));
+      return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid),
+        { worker: await workerStatus(), msg: url.searchParams.get('msg') }));
+    }
+    const rtm = path.match(/^\/applications\/(\d+)\/retry$/);
+    if (rtm && req.method === 'POST') {
+      const form = await readForm(req);
+      const out = await retryQueueItem(Number(rtm[1]), uid, { test: form.mode === 'test' }); // owner-scoped
+      const msg = out.ok ? (form.mode === 'test' ? 'test' : 'queued') : out.error;
+      res.writeHead(303, { Location: `/applications?msg=${encodeURIComponent(msg)}` });
+      return res.end();
     }
     const cvm = path.match(/^\/applications\/(\d+)\/cv$/);
     if (cvm) {

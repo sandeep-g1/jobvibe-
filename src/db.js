@@ -409,6 +409,42 @@ export async function nextQueued(limit = 1) {
   return d.query(`SELECT * FROM apply_queue WHERE status = 'queued' ORDER BY updated_at ASC LIMIT ?`, [limit]);
 }
 
+/** The worker's "I'm alive" row (worker/index.js writes it every loop). */
+export async function workerBeat({ host, pid, mode, startedAt, note = null }) {
+  const d = await db();
+  await d.run(
+    `INSERT INTO worker_status (host, pid, mode, started_at, seen_at, note) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(host) DO UPDATE SET pid = excluded.pid, mode = excluded.mode, started_at = excluded.started_at,
+       seen_at = excluded.seen_at, note = excluded.note`,
+    [host, pid, mode, startedAt, now(), note]);
+}
+
+/** The most recently seen worker, or null if none ever ran. */
+export async function workerStatus() {
+  const d = await db();
+  return d.one('SELECT host, pid, mode, started_at, seen_at, note FROM worker_status ORDER BY seen_at DESC LIMIT 1');
+}
+
+/**
+ * Send one of the user's applications back to the worker (owner-scoped).
+ * test: fill everything and stop at the final page without submitting.
+ * Only a failed attempt or a test run can be sent again: anything that may have
+ * reached the employer (submitted, unconfirmed…) never is, so nobody applies twice.
+ */
+export async function retryQueueItem(id, userId, { test = false } = {}) {
+  const d = await db();
+  const row = await d.one('SELECT id, status, detail FROM apply_queue WHERE id = ? AND user_id = ?', [id, userId]);
+  if (!row) return { ok: false, error: 'not found' };
+  const allowed = test ? ['failed'] : ['failed', 'dry_run'];
+  if (!allowed.includes(row.status)) return { ok: false, error: `can't retry an application that is ${row.status}` };
+  let det = {}; try { det = JSON.parse(row.detail || '{}'); } catch { /* none */ }
+  det.testRun = test;
+  delete det.lastError;
+  await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL, attempts = 0, detail = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(det), now(), id]);
+  return { ok: true };
+}
+
 /** Keep the CV used for one application (downloadable from the Applications page). */
 export async function saveQueueCv(id, name, buffer) {
   const d = await db();
