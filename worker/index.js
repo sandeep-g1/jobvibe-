@@ -27,6 +27,7 @@ import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
 import { ownDocx } from '../src/lib/docx-meta.js';
+import { waitForEmailCode } from './mailcode.js';
 import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
@@ -160,7 +161,9 @@ async function processItem(item, browser) {
   }
 
   log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);
-  const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY });
+  // A form that emails a security code after Submit: read it from her connected job-hunt inbox.
+  const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
+  const r = await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
   if (r.status === 'email_code') {

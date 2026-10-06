@@ -60,6 +60,23 @@ async function challengeShown(page) {
     return r.height > 120 && r.width > 120 && getComputedStyle(f).visibility !== 'hidden';
   })).catch(() => false);
 }
+/** Type an emailed code into the form: one box, or one box per character. */
+async function enterCode(page, code) {
+  const boxes = page.locator('input[maxlength="1"]:visible');
+  const n = await boxes.count();
+  if (n >= code.length) {
+    for (let k = 0; k < code.length; k++) await boxes.nth(k).fill(code[k]);
+    return true;
+  }
+  // Most specific first; never a postal, zip or phone-country "code" field.
+  const not = ':not([type=hidden]):not([name*="postal" i]):not([id*="postal" i]):not([name*="zip" i]):not([name*="country" i]):not([id*="country" i])';
+  for (const sel of ['input[autocomplete="one-time-code"]', 'input[id*="security" i]', 'input[name*="security" i]',
+    'input[aria-label*="security code" i]', `input[id*="code" i]${not}`, `input[name*="code" i]${not}`]) {
+    const one = page.locator(sel).filter({ visible: true }).first();
+    if (await one.count()) { await one.fill(code); return true; }
+  }
+  return false;
+}
 const PARSING = /analy[sz]ing (your )?(resume|cv)|parsing (your )?(resume|cv)|reading your (resume|cv)/i;
 const CHALLENGE = 'iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"], iframe[title*="challenge" i]';
 
@@ -108,7 +125,7 @@ async function openForm(page, url) {
  * @param {string} o.cvText   plain CV text (for essays)
  * @param {boolean} o.dryRun  fill but never submit
  */
-export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true }) {
+export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true, getEmailCode = null }) {
   const ats = atsOf(job.url);
   const url = formUrl(job.url, ats);
   const dir = join(tmpdir(), 'jobvibe-apply', safe(`${job.company}_${job.title}`));
@@ -215,8 +232,10 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const before = new Set(await visibleLines());
     const urlBefore = page.url();
     const errorsBefore = new Set(await visibleErrors(page));
+    const clickedAt = new Date();
     await btn.click({ timeout: 15000 });
     clicked = true; // from here on, never auto-retry unless the form clearly rejected it
+    let codeEntered = false;
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);
       const fresh = (await visibleLines()).filter((l) => !before.has(l));
@@ -230,8 +249,19 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
         return { status: 'captcha', url, filled, screenshot: await page.screenshot({ fullPage: true }).catch(() => screenshot) };
       }
       // Greenhouse emails the applicant a security code and waits for it: not submitted yet.
-      const code = fresh.find((l) => EMAIL_CODE.test(l));
-      if (code) return { status: 'email_code', reason: code.slice(0, 200), url, filled, log, clicked };
+      // With the user's mailbox connected, read the code sent after this click, enter it, resubmit.
+      const asks = !codeEntered && fresh.find((l) => EMAIL_CODE.test(l));
+      if (asks) {
+        if (!getEmailCode) return { status: 'email_code', reason: asks.slice(0, 200), url, filled, log, clicked };
+        const code = await getEmailCode(clickedAt);
+        if (!code) return { status: 'email_code', reason: 'the security code email did not arrive within 2 minutes', url, filled, log, clicked };
+        if (!(await enterCode(page, code))) return { status: 'email_code', reason: "couldn't find the security code field", url, filled, log, clicked };
+        log.push('entered the security code emailed to the applicant');
+        const again = await findSubmit(page);
+        if (again) await again.click({ timeout: 15000 }).catch(() => {});
+        codeEntered = true;
+        i = 0; // give the resubmission its own wait
+      }
     }
     // Only errors that became visible after the click: forms carry hidden error templates
     // ("File exceeds the maximum upload size…") from the moment they load.
