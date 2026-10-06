@@ -14,6 +14,9 @@ export function configured() {
 
 export const setupUrl = 'https://developer.adzuna.com/';
 
+/** Kept well inside the free developer tier (src/lib/quota.js spreads it over the month; a 429 pauses it). */
+export const monthlyBudget = 900;
+
 /** One call per search term. Adzuna caps results_per_page at 50. */
 export async function fetchQuery({ term, location, perPage = 50, maxAge = 30 }) {
   const k = keys().adzuna;
@@ -23,7 +26,8 @@ export async function fetchQuery({ term, location, perPage = 50, maxAge = 30 }) 
     results_per_page: String(perPage),
     what: term,
     max_days_old: String(maxAge),
-    content_type: 'application/json',
+    // Hyphen, not underscore: Adzuna rejects unknown parameters with a 400.
+    'content-type': 'application/json',
   });
   if (location) q.set('where', location);
 
