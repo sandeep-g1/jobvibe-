@@ -2,7 +2,7 @@
 // classify job emails, alert the user on Telegram with a drafted reply, and
 // send replies only after the user taps "Send" there.
 import { createRequire } from 'node:module';
-import { insertInboxEvent, applicationsForMatching, updateQueueItem, repliesToSend, setReplyStatus, saveProfileRow } from '../src/db.js';
+import { insertInboxEvent, applicationsForMatching, updateQueueItem, repliesToSend, setReplyStatus, saveProfileRow, markApplied } from '../src/db.js';
 import { decrypt } from '../src/lib/secrets.js';
 import { loadProfileAsync } from '../src/lib/profile.js';
 import { looksJobRelated, matchApplication, classifyEmail } from '../src/lib/mail-classify.js';
@@ -103,6 +103,14 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
     });
     if (!id) continue; // seen before
     found++;
+    if (app?.status === 'unconfirmed' && c.category !== 'other') {
+      // The site showed no confirmation, but the employer's own email proves it arrived.
+      const detail = { ...JSON.parse(app.detail || '{}'), evidence: { email: mail.subject, from: mail.fromAddr || mail.from, at: mail.date } };
+      await updateQueueItem(app.id, { status: 'submitted', reason: null, detail: JSON.stringify(detail) });
+      await markApplied(app.fingerprint, userId);
+      app.status = 'submitted'; app.detail = JSON.stringify(detail);
+      await tell(profile, `✅ <b>Confirmed: ${h(app.company)} received your application</b> · ${h(app.title)}\nTheir email: "${h(mail.subject)}"`);
+    }
     if (app) {
       // A routine "received" or unrelated email never hides an interview, offer, etc.
       const detail = JSON.parse(app.detail || '{}');

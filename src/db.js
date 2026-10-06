@@ -526,9 +526,9 @@ export async function repliesToSend() {
 export async function applicationsForMatching(userId) {
   const d = await db();
   return d.query(
-    `SELECT q.id, q.status, q.detail, j.company, j.title FROM apply_queue q
+    `SELECT q.id, q.status, q.detail, q.fingerprint, j.company, j.title FROM apply_queue q
        JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
-      WHERE q.user_id = ? AND q.status IN ('submitted', 'captcha', 'manual', 'needs_user')`, [userId]);
+      WHERE q.user_id = ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'manual', 'needs_user')`, [userId]);
 }
 
 /* ---------------- applications ---------------- */
