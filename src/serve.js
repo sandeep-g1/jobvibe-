@@ -13,6 +13,7 @@ import { buildRows, renderReport } from './report.js';
 import { dashboardPage, reportsPage, notFoundPage } from './web/pages.js';
 import { settingsPage } from './web/settings.js';
 import { emailConfigured } from './email.js';
+import { sendAppReports } from './app-report.js';
 import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED, encrypt } from './lib/secrets.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
@@ -265,14 +266,18 @@ export async function handler(req, res) {
     if (!authorised) {
       return send(res, 401, 'application/json', JSON.stringify({ error: 'unauthorised' }));
     }
+    // Daily applications report to every user with applications (admin in CC),
+    // whether or not the daily search is on.
+    let reports = null;
+    try { reports = await sendAppReports(); } catch (err) { reports = { error: err.message }; }
     // Nobody has the daily schedule on: don't spin up a runner or crawl anything.
     if (!(await activeProfiles()).length) {
       return send(res, 200, 'application/json',
-        JSON.stringify({ started: false, message: 'no schedule-active users — skipped' }));
+        JSON.stringify({ started: false, message: 'no schedule-active users — skipped', reports }));
     }
     const out = await startRun();
     return send(res, out.started ? 202 : 409, 'application/json',
-      JSON.stringify({ ...out, at: new Date().toISOString(), runner: RUNNER }));
+      JSON.stringify({ ...out, reports, at: new Date().toISOString(), runner: RUNNER }));
   }
 
   if (!isPostgres && process.env.VERCEL) {
