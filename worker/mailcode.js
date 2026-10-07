@@ -50,13 +50,13 @@ async function lookOnce(mb, { since, company }) {
  * Wait for an account-verification email sent after `since` and return its link on `host`
  * (e.g. "hitachi.wd1.myworkdayjobs.com"), or null on timeout. Read-only, nothing marked read.
  */
-export async function waitForVerifyLink(mb, { since, host, timeoutMs = 180000 }) {
+export async function waitForVerifyLink(mb, { since, host, timeoutMs = 180000, subject = /verif|activat|confirm/i, link: linkRe = /verif|activat|confirm|token/i }) {
   if (!mb?.passEnc) return null;
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     await new Promise((r) => setTimeout(r, 8000));
     try {
-      const link = await lookForLink(mb, { since, host });
+      const link = await lookForLink(mb, { since, host, subject, linkRe });
       if (link) return link;
     } catch (err) {
       console.log(`verify mail check: ${err.code || err.message}`);
@@ -65,7 +65,7 @@ export async function waitForVerifyLink(mb, { since, host, timeoutMs = 180000 })
   return null;
 }
 
-async function lookForLink(mb, { since, host }) {
+async function lookForLink(mb, { since, host, subject, linkRe }) {
   const client = new ImapFlow({
     host: mb.host || 'imap.gmail.com', port: 993, secure: true, logger: false,
     auth: { user: mb.email, pass: decrypt(mb.passEnc) },
@@ -80,9 +80,9 @@ async function lookForLink(mb, { since, host }) {
     for await (const msg of client.fetch(recent, { uid: true, source: true }, { uid: true })) {
       const m = await simpleParser(msg.source);
       if (!m.date || m.date.getTime() < since.getTime() - 60000) continue;
-      if (!/verif|activat|confirm/i.test(m.subject || '')) continue;
+      if (!subject.test(m.subject || '')) continue;
       const links = [...String(m.html || m.text || '').matchAll(/https:\/\/[^\s"'<>]+/g)].map((x) => x[0].replace(/&amp;/g, '&'));
-      const link = links.find((u) => { try { return new URL(u).hostname === host && /verif|activat|confirm|token/i.test(u); } catch { return false; } });
+      const link = links.find((u) => { try { return new URL(u).hostname === host && linkRe.test(u); } catch { return false; } });
       if (link) return link;
     }
     return null;
@@ -91,6 +91,10 @@ async function lookForLink(mb, { since, host }) {
     await client.logout().catch(() => {});
   }
 }
+
+/** Wait for a password-reset email sent after `since` and return its link on `host`, or null. */
+export const waitForResetLink = (mb, { since, host, timeoutMs }) =>
+  waitForVerifyLink(mb, { since, host, timeoutMs, subject: /reset|password/i, link: /reset|password|token/i });
 
 /** Wait for the code email sent after `since` (a Date). Returns the code or null on timeout. */
 export async function waitForEmailCode(mb, { since, company, timeoutMs = 120000 }) {

@@ -87,11 +87,72 @@ async function signIn(page, acc) {
   await settle(page);
 }
 
+/** The page's own submit-type button (reset/send/continue/save), never Cancel/Back/Sign In links. */
+async function submitButton(page) {
+  for (const sel of [ID('forgotPasswordSubmitButton'), ID('resetPasswordSubmitButton'), ID('changePasswordSubmitButton'), 'button[type=submit]', 'button']) {
+    const list = page.locator(`${sel}:visible`);
+    for (let i = 0; i < await list.count(); i++) {
+      const b = list.nth(i);
+      const t = ((await b.innerText().catch(() => '')) || '').trim();
+      if (/cancel|back|sign in|create account|google|apple|linkedin/i.test(t)) continue;
+      if (sel.startsWith('button') && !/submit|send|reset|continue|save|change|ok\b/i.test(t)) continue;
+      return b;
+    }
+  }
+  return null;
+}
+
+/**
+ * The account exists but we have no working password: reset it through the
+ * employer's "Forgot your password?" email (read from her inbox), store the new
+ * one, and start again signed in. Returns { restart } or an outcome to stop with.
+ */
+async function recoverAccount(page, { email, createAccount, getResetLink }) {
+  const why = (s) => ({ status: 'manual', reason: `a Workday account with your email already exists on this site and resetting its password did not work (${s}); use "Forgot your password?" there`, noRetry: true });
+  if (!getResetLink) return why('no mailbox to receive the reset email');
+  // To the sign-in form, then "Forgot your password?".
+  if (!(await page.locator(`${ID('forgotPasswordLink')}:visible`).count())) {
+    if (await page.locator(`${ID('signInLink')}:visible`).count()) await press(page, 'signInLink');
+    else if (await page.locator(`${ID('SignInWithEmailButton')}:visible`).count()) await press(page, 'SignInWithEmailButton');
+    await page.waitForTimeout(1500);
+  }
+  if (!(await page.locator(`${ID('forgotPasswordLink')}:visible`).count())) return why('no "Forgot your password?" link');
+  await press(page, 'forgotPasswordLink');
+  await page.waitForTimeout(1500);
+  const box = page.locator(`${ID('email')}:visible, input[type=email]:visible`).first();
+  if (!(await box.count())) return why('no email field on the reset form');
+  await box.fill(email);
+  const send = await submitButton(page);
+  if (!send) return why('no button to send the reset email');
+  const since = new Date();
+  await press(page, send);
+  await settle(page);
+  const link = await getResetLink(since);
+  if (!link) return why('the reset email did not arrive');
+  await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(3000);
+  const pw = page.locator('input[type=password]:visible');
+  if ((await pw.count()) < 1) return why('the reset link showed no password form');
+  const acc = { email, password: newPassword(), verified: true, reset: true };
+  for (let i = 0; i < await pw.count(); i++) await pw.nth(i).fill(acc.password);
+  const save = await submitButton(page);
+  if (!save) return why('no button to save the new password');
+  const before = new Set(await visibleErrors(page));
+  await press(page, save);
+  await settle(page);
+  await page.waitForTimeout(2000);
+  // Only errors that appeared after saving count.
+  const errs = (await visibleErrors(page)).filter((e) => !before.has(e));
+  if (errs.length && (await page.locator('input[type=password]:visible').count())) return why(`Workday: "${errs.join(' | ').slice(0, 120)}"`);
+  await createAccount(acc); // the new password is the one that works now
+  return { restart: acc };
+}
+
 /**
  * Get past "Create Account/Sign In". Returns null when signed in, or an outcome to stop with.
  * `account` is the stored { email, password } for this site, or null.
  */
-async function enter(page, { account, profile, createAccount, getVerifyLink }) {
+async function enter(page, { account, profile, createAccount, getVerifyLink, getResetLink, recover }) {
   const emailBtn = page.locator(ID('SignInWithEmailButton'));
   await Promise.race([
     emailBtn.waitFor({ timeout: 45000 }),
@@ -104,7 +165,9 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
     await signIn(page, account);
     const errs = await visibleErrors(page);
     if (errs.length && await page.locator(ID('signInSubmitButton')).isVisible().catch(() => false)) {
-      return { status: 'failed', reason: `Workday sign-in failed: ${errs.join(' | ').slice(0, 150)}`, signInFailed: true };
+      // The stored password no longer works: reset it once through her inbox.
+      if (recover) return recoverAccount(page, { email: account.email, createAccount, getResetLink });
+      return { status: 'failed', reason: `Workday sign-in failed: ${errs.join(' | ').slice(0, 150)}`, signInFailed: true, noRetry: true };
     }
     return null;
   }
@@ -133,6 +196,8 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   const says = (await pageSays(page)).replace(/^[\s\S]*?\bReview\b/, '').trim();
   const message = (errs.join(' | ') || says).slice(0, 300);
   if (/already (exists|in use|registered|been used)|account (with|for) this email|email (address )?is already/i.test(`${errs.join(' ')} ${says}`)) {
+    // Created earlier without a working password (or by her): reset it through her inbox.
+    if (recover) return recoverAccount(page, { email, createAccount, getResetLink });
     return { status: 'manual', reason: `a Workday account with your email already exists on this site (Workday: "${message.slice(0, 150)}")`, noRetry: true,
       screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   }
@@ -291,7 +356,7 @@ async function fill(page, f, value, files) {
  *   createAccount    async (acc) => void   store a new account (encrypted by the caller)
  *   getVerifyLink    async (since) => url  read the verification link from the inbox
  */
-export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun = true, account = null, createAccount, getVerifyLink }) {
+export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun = true, account = null, createAccount, getVerifyLink, getResetLink = null }) {
   const dir = join(tmpdir(), 'jobvibe-apply', safe(`${job.company}_${job.title}`));
   mkdirSync(dir, { recursive: true });
   const files = { cv: join(dir, cvName || 'Resume.docx') };
@@ -316,8 +381,11 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       if (await how.count()) await press(page, how);
       await settle(page);
       if (ALREADY.test(await bodyText(page))) return { status: 'already_applied', reason: 'Workday says you already applied to this job', url };
-      const r = await enter(page, { account, profile, createAccount, getVerifyLink });
-      if (r?.restart) { account = r.restart; continue; }
+      const r = await enter(page, { account, profile, createAccount, getVerifyLink, getResetLink, recover: attempt === 0 });
+      if (r?.restart) {
+        if (attempt === 1) return { status: 'failed', reason: 'Workday sign-in did not work even after setting up the account', url, log, noRetry: true };
+        account = r.restart; continue;
+      }
       if (r) return { ...r, url, log };
       break;
     }

@@ -27,7 +27,7 @@ import { extractText } from '../src/lib/resume.js';
 import { telegramConfigured, send, sendFile, askUser, h } from '../src/lib/telegram.js';
 import { applyOne } from './apply/run.js';
 import { ownDocx } from '../src/lib/docx-meta.js';
-import { waitForEmailCode, waitForVerifyLink } from './mailcode.js';
+import { waitForEmailCode, waitForVerifyLink, waitForResetLink } from './mailcode.js';
 import { applyWorkday, siteKey } from './apply/workday.js';
 import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
@@ -102,9 +102,12 @@ function workdayAccount(userId, profile, url) {
       await saveProfileRow(next, userId);
       log(`${userId}: Workday account ${acc.verified ? 'verified' : 'created'} on ${key}`);
       // She should know an account exists in her name (she can use "Forgot password" there to sign in herself).
+      if (acc.reset) await notify(profile, `🔐 Your Workday account on <b>${h(new URL(url).hostname)}</b> (${h(acc.email)}) already existed without a password I could use, so I reset it through the email it sent you. The new password is stored encrypted.`);
       if (!stored && !acc.verified) await notify(profile, `🔐 I created a Workday candidate account for you on <b>${h(new URL(url).hostname)}</b> with ${h(acc.email)}, to apply there. The password is stored encrypted; use "Forgot password" on that site if you ever want to sign in yourself.`);
     },
     getVerifyLink: (since) => waitForVerifyLink(profile.mailbox, { since, host: new URL(url).hostname }),
+    // Account exists without a working password: reset it through her inbox.
+    getResetLink: profile.mailbox?.passEnc ? (since) => waitForResetLink(profile.mailbox, { since, host: new URL(url).hostname }) : null,
   };
 }
 
