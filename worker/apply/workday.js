@@ -22,7 +22,7 @@ import { blocksEligibility, CONFIRM } from './run.js';
 
 const ID = (id) => `[data-automation-id="${id}"]`;
 const NEXT = `${ID('pageFooterNextButton')}, ${ID('bottom-navigation-next-button')}`;
-const ERRORS = `${ID('errorBanner')}, ${ID('errorMessage')}, [data-automation-id*="error-message" i]`;
+const ERRORS = `${ID('errorBanner')}, ${ID('errorMessage')}, [data-automation-id*="error-message" i], [role="alert"]`;
 const SUBMITTED = /application (has been |was )?(submitted|received)|thanks? (you )?for applying|you('ve| have) (successfully )?applied|successfully submitted|congratulations/i;
 const ALREADY = /you('ve| have) already applied|already (submitted|applied)/i;
 const VERIFY = /verify (your )?(email|account)|verification (email|link)|check your (email|inbox)|activate your account/i;
@@ -113,7 +113,8 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   const email = profile.mailbox?.email;
   if (!email) return { status: 'manual', reason: 'Workday needs your job-hunt mailbox connected (for the account and its emails)' };
   if (!profile.answers?.consentStandard) return { status: 'needs_user', questions: [{ label: 'Workday account: allow the agent to accept the employer\'s data-privacy notice?', reason: 'consent box', options: ['Yes', 'No'] }] };
-  await press(page, 'createAccountLink');
+  // Some sites (Illumina) open on the Create Account form itself, with no link to it.
+  if (!(await page.locator(`${ID('verifyPassword')}:visible`).count())) await press(page, 'createAccountLink');
   await page.locator(ID('verifyPassword')).first().waitFor({ timeout: 15000 });
   const acc = { email, password: newPassword() };
   await page.locator(ID('email')).first().fill(acc.email);
@@ -127,13 +128,19 @@ async function enter(page, { account, profile, createAccount, getVerifyLink }) {
   await page.waitForTimeout(2500);
 
   const errs = await visibleErrors(page);
-  if (errs.some((e) => /already (exists|in use|registered)|account with this email/i.test(e))) {
-    return { status: 'manual', reason: 'a Workday account with your email already exists on this site; apply there with your own password' };
+  // Workday's message can sit outside any error box: read the form's own text too
+  // (everything after the progress steps, which end at "Review").
+  const says = (await pageSays(page)).replace(/^[\s\S]*?\bReview\b/, '').trim();
+  const message = (errs.join(' | ') || says).slice(0, 300);
+  if (/already (exists|in use|registered|been used)|account (with|for) this email|email (address )?is already/i.test(`${errs.join(' ')} ${says}`)) {
+    return { status: 'manual', reason: `a Workday account with your email already exists on this site (Workday: "${message.slice(0, 150)}")`, noRetry: true,
+      screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   }
   if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check when creating the account' };
   // Still on the create-account form: Workday did not accept it. Nothing is stored.
   if (await page.locator(`${ID('verifyPassword')}:visible`).count()) {
-    return { status: 'failed', reason: `Workday did not create the account: ${(errs.join(' | ') || await pageSays(page)).slice(0, 250)}`, noRetry: true };
+    return { status: 'failed', reason: `Workday did not create the account: "${message}"`, noRetry: true,
+      screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   }
   await createAccount(acc); // accepted: the account exists from here on
 
