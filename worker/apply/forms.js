@@ -165,6 +165,9 @@ export async function comboOptions(page, f) {
   } catch { return []; }
 }
 
+// Cities that place pickers list under another name.
+const CITY_ALT = { bengaluru: 'bangalore', bangalore: 'bengaluru', mumbai: 'bombay', gurugram: 'gurgaon', gurgaon: 'gurugram', chennai: 'madras', kolkata: 'calcutta' };
+
 /** Fill one field with an answer from the answer engine. Returns true if it took. */
 export async function fillField(page, f, answer) {
   const el = page.locator(f.selector).first();
@@ -173,9 +176,11 @@ export async function fillField(page, f, answer) {
     await el.click({ timeout: 5000 });
     await el.fill('');
     await el.pressSequentially(String(answer).slice(0, 40), { delay: 15 });
-    await page.waitForTimeout(700);
     const want = String(answer).trim().toLowerCase();
     const opts = page.locator('[role="option"]');
+    // Suggestions often load from the network (place search): wait for them, not a fixed pause.
+    const settled = async () => { await opts.first().waitFor({ timeout: 6000 }).catch(() => {}); await page.waitForTimeout(500); };
+    await settled();
     const n = await opts.count();
     // Best match, never just "the first suggestion": typing "India" lists
     // "British Indian Ocean Territory (+246)" before "India (+91)".
@@ -188,23 +193,25 @@ export async function fillField(page, f, answer) {
           : want.includes(t) && t.length > 2 ? 3 : 9);
     const best = texts.map((t, i) => ({ i, r: rank(t) })).filter((x) => x.r < 9).sort((a, b) => a.r - b.r || a.i - b.i)[0];
     if (best) { await opts.nth(best.i).click(); return true; }
-    // Typeahead places ("Pune, India" vs "Pune, Maharashtra, India"): search the first part only.
+    // Typeahead places ("Pune, India" vs "Pune, Maharashtra, India"): search the first part only,
+    // then the city's other common spelling (Bengaluru/Bangalore…).
     const head = want.split(',')[0].trim();
-    if (head && head !== want) {
+    for (const city of [...new Set([head, CITY_ALT[head]].filter(Boolean))]) {
+      if (!city || (city === want && !CITY_ALT[head])) continue;
       await el.fill('');
-      await el.pressSequentially(head, { delay: 15 });
-      await page.waitForTimeout(1500);
+      await el.pressSequentially(city, { delay: 15 });
+      await settled();
       const m = await opts.count();
       for (let i = 0; i < m; i++) {
         const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();
-        if (t.startsWith(head)) { await opts.nth(i).click(); return true; }
+        if (t.startsWith(city)) { await opts.nth(i).click(); return true; }
       }
     }
     // Directories (schools, employers) that don't list it: their own "Other" entry.
     if (f.allowOther) {
       await el.fill('');
       await el.pressSequentially('Other', { delay: 15 });
-      await page.waitForTimeout(1000);
+      await settled();
       const m = await opts.count();
       for (let i = 0; i < m; i++) {
         const t = ((await opts.nth(i).innerText().catch(() => '')) || '').trim().toLowerCase();

@@ -41,6 +41,9 @@ const urlKey = (s) => String(s).trim().toLowerCase().replace(/^https?:\/\/(www\.
 function sameMeaning(a, b) {
   const x = String(a ?? '').trim(), y = String(b ?? '').trim();
   if (x.toLowerCase() === y.toLowerCase()) return true;
+  // Phone numbers the site reformats ("7030193602" → "70301 93602", "+91 …"): same digits, same number.
+  const dx = x.replace(/\D/g, ''), dy = y.replace(/\D/g, '');
+  if (/^[\d\s()+-]{7,}$/.test(x) && /^[\d\s()+-]{7,}$/.test(y) && (dx === dy || dx.endsWith(dy) || dy.endsWith(dx))) return true;
   if (/^(https?:\/\/|www\.)/i.test(x) && /^(https?:\/\/|www\.)/i.test(y)) return urlKey(x) === urlKey(y);
   const cx = resolveChoice(x.split(',')[0]), cy = resolveChoice(y.split(',')[0]);
   return !!(cx?.city && cy?.city && cx.city === cy.city);
