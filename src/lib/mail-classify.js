@@ -41,6 +41,7 @@ export function looksJobRelated(mail, applications) {
   if (matchApplication(mail, applications)) return true;
   const ownDomain = (process.env.EMAIL_FROM || '').match(/@([a-z0-9.-]+)/i)?.[1];
   if (NOISE.test(mail.from) || (ownDomain && lc(mail.from).includes(ownDomain.toLowerCase()))) return false;
+  if (/^jobvibe/i.test(mail.subject || '')) return false; // our own reports and digests
   if (/^jobvibe/i.test(String(mail.subject))) return false; // our own digest emails
   return JOBBY.test(`${mail.subject} ${String(mail.text).slice(0, 1500)}`);
 }

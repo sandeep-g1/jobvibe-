@@ -292,6 +292,8 @@ async function onCallback(cb) {
     const owner = (await allProfiles()).find((p) => p.userId === ev.user_id);
     if (!owner || owner.data?.telegram?.chatId !== chatId || cb.from?.id !== chatId) return answer('This button belongs to another account.');
     if (ev.reply_status === 'sent') return answer('Already sent.');
+    // Only a current draft can be sent: an older one may have been replaced by a newer draft.
+    if (ev.reply_status !== 'drafted') return answer('This draft was replaced or already handled.');
     await setReplyStatus(ev.id, ev.user_id, kind === 'rs' ? 'approved' : 'dismissed');
     await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
     await send(chatId, kind === 'rs' ? `✉️ Sending your reply to ${h(ev.from_addr)} in the next minute.` : '✋ Okay, you\'ll reply yourself.');

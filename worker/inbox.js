@@ -103,7 +103,8 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
     });
     if (!id) continue; // seen before
     found++;
-    if (app?.status === 'unconfirmed' && c.category !== 'other') {
+    if ((app?.status === 'unconfirmed' || app?.status === 'captcha') && c.category !== 'other') {
+      // (A CAPTCHA after Submit doesn't always stop the application: the employer's email decides.)
       // The site showed no confirmation, but the employer's own email proves it arrived.
       const detail = { ...JSON.parse(app.detail || '{}'), evidence: { email: mail.subject, from: mail.fromAddr || mail.from, at: mail.date } };
       await updateQueueItem(app.id, { status: 'submitted', reason: null, detail: JSON.stringify(detail) });
