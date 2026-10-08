@@ -104,6 +104,24 @@ export async function runIngest({ profile, profiles = [] } = {}) {
   }
   log(`${raw.length} postings fetched`);
 
+  const { afterIndia, unique: nUnique, newJobs } = await persistRows(raw, crawl);
+  log(`${nUnique} unique · ${newJobs} new to the pool`);
+  await finishIngest(id, {
+    perSource, fetched: raw.length, afterIndia,
+    newJobs, poolSize: nUnique, errors,
+  });
+
+  return {
+    id, fetched: raw.length, afterIndia, newJobs,
+    perSource, errors, seconds: (Date.now() - t0) / 1000,
+  };
+}
+
+/**
+ * Country gate, de-duplication, enrichment and storage for adapter-shaped rows.
+ * Shared by the search (runIngest) and the job-alert reader. Returns counts.
+ */
+export async function persistRows(raw, crawl) {
   // Normalise + country gate: keep only postings in a country someone chose.
   const usable = raw.filter(isUsable);
   const indian = [];
@@ -155,14 +173,5 @@ export async function runIngest({ profile, profiles = [] } = {}) {
     }
   }
 
-  log(`${deduped.length} unique · ${newJobs} new to the pool`);
-  await finishIngest(id, {
-    perSource, fetched: raw.length, afterIndia: indian.length,
-    newJobs, poolSize: deduped.length, errors,
-  });
-
-  return {
-    id, fetched: raw.length, afterIndia: indian.length, newJobs,
-    perSource, errors, seconds: (Date.now() - t0) / 1000,
-  };
+  return { afterIndia: indian.length, unique: deduped.length, newJobs };
 }

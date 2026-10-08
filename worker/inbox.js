@@ -7,6 +7,9 @@ import { decrypt } from '../src/lib/secrets.js';
 import { loadProfileAsync } from '../src/lib/profile.js';
 import { looksJobRelated, matchApplication, classifyEmail } from '../src/lib/mail-classify.js';
 import { telegramConfigured, send, h } from '../src/lib/telegram.js';
+import { alertPortal, alertRows } from '../src/lib/job-alerts.js';
+import { persistRows } from '../src/ingest.js';
+import { userScope } from '../src/lib/geo.js';
 
 const require = createRequire(import.meta.url);
 const { ImapFlow } = require('imapflow');
@@ -52,7 +55,14 @@ export async function fetchNewMail(mb) {
         const m = await simpleParser(msg.source);
         out.push({
           uid: msg.uid, from: m.from?.text || '', fromAddr: m.from?.value?.[0]?.address || '',
-          subject: m.subject || '', text: (m.text || '').slice(0, 8000), messageId: m.messageId || null,
+          subject: m.subject || '',
+          // HTML-only emails (most job alerts) have no text part: use the HTML's text.
+          text: (m.text || String(m.html || '').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#8203;|&emsp;/g, ' ').replace(/\s+/g, ' ')).slice(0, 8000),
+          // Link text → address, for job alerts (the jobs are links).
+          links: [...String(m.html || '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)]
+            .map((x) => ({ href: x[1].replace(/&amp;/g, '&'), text: x[2].replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim() }))
+            .filter((l) => l.text && /^https?:/i.test(l.href)).slice(0, 80),
+          messageId: m.messageId || null,
           date: m.date ? m.date.toISOString() : null,
         });
         maxUid = Math.max(maxUid, msg.uid);
@@ -90,8 +100,12 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
 
   const apps = await applicationsForMatching(userId);
   let found = 0;
+  const alerts = [];
   for (const mail of result.messages) {
     if (mail.fromAddr && mail.fromAddr.toLowerCase() === mb.email.toLowerCase()) continue; // our own sent mail
+    // Job alerts from Naukri, LinkedIn, Indeed… (direct or forwarded): jobs for the pool, not messages.
+    const portal = alertPortal(mail);
+    if (portal) { alerts.push({ mail, portal }); continue; }
     if (!looksJobRelated(mail, apps)) continue;
     const app = matchApplication(mail, apps);
     const c = await classifyEmail(mail, { profile, application: app });
@@ -133,7 +147,14 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
     }
   }
   await saveMailbox(userId, { status: 'ok', error: null, lastUid: result.maxUid, lastCheck: new Date().toISOString() });
-  return `${result.messages.length} new, ${found} job email(s)`;
+  let alertNote = '';
+  if (alerts.length) {
+    const rows = [];
+    for (const { mail, portal } of alerts) rows.push(...await alertRows(mail, portal).catch(() => []));
+    const { newJobs } = rows.length ? await persistRows(rows, userScope(profile).crawl) : { newJobs: 0 };
+    alertNote = `, ${alerts.length} job alert(s): ${rows.length} jobs (${rows.filter((r) => r.employerForm).length} on the employer's own form), ${newJobs} new`;
+  }
+  return `${result.messages.length} new, ${found} job email(s)${alertNote}`;
 }
 
 /** Send replies the user approved on Telegram. */
