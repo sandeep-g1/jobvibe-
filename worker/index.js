@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
-  claimDestination, saveProfileRow,
+  claimDestination, saveProfileRow, matchTailoring,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
@@ -186,7 +186,14 @@ async function processItem(item, browser) {
   let cv = original;
   let tailored = false;
   let tailoring = null; // { ats: {before, after}, added: [{skill, basedOn}] } when tailored
-  if (ext === 'docx') {
+  // The CV tailored when the job's card was sent (its ATS score was on the card): send that
+  // exact CV. Otherwise tailor now.
+  const pre = await matchTailoring(item.match_id).catch(() => null);
+  if (pre?.tailored_cv_b64) {
+    cv = Buffer.from(pre.tailored_cv_b64, 'base64'); tailored = true;
+    let added = []; try { added = JSON.parse(pre.tailor_added || '[]'); } catch { /* none */ }
+    tailoring = { ats: pre.ats_after != null ? { before: pre.ats_before, after: pre.ats_after } : null, added };
+  } else if (ext === 'docx') {
     const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
     if (t.ok) { cv = t.buffer; tailored = true; tailoring = { ats: t.ats ? { before: t.ats.before, after: t.ats.after } : null, added: t.added || [] }; }
   }

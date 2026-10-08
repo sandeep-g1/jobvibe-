@@ -359,7 +359,7 @@ export async function matchesForRun(runId) {
 export async function matchWithJob(matchId) {
   const d = await db();
   return d.one(
-    `SELECT m.id, m.user_id, m.fingerprint, m.score, m.why_text, m.recommendation, m.decision,
+    `SELECT m.id, m.user_id, m.fingerprint, m.score, m.why_text, m.recommendation, m.decision, m.ats_before, m.ats_after,
             j.title, j.company, j.city, j.country, j.work_mode, j.apply_url, j.final_url, j.salary_raw, j.apply_route
        FROM job_matches m JOIN jobs j ON j.id = m.job_id WHERE m.id = ?`,
     [matchId]
@@ -376,10 +376,23 @@ export async function setDecision(matchId, userId, decision) {
 }
 
 /** Top matches of one run, best first, with their ids (for the Telegram digest). */
+/** Store the CV tailored for a match (when its card is sent) and its ATS keyword scores. */
+export async function saveMatchTailoring(matchId, { before, after, added, buffer }) {
+  const d = await db();
+  await d.run('UPDATE job_matches SET ats_before = ?, ats_after = ?, tailor_added = ?, tailored_cv_b64 = ? WHERE id = ?',
+    [before ?? null, after ?? null, JSON.stringify(added || []), buffer ? buffer.toString('base64') : null, matchId]);
+}
+
+/** The CV tailored for a match, if one was made. */
+export async function matchTailoring(matchId) {
+  const d = await db();
+  return d.one('SELECT ats_before, ats_after, tailor_added, tailored_cv_b64 FROM job_matches WHERE id = ?', [matchId]);
+}
+
 export async function topMatchesForRun(runId, limit = 5) {
   const d = await db();
   return d.query(
-    `SELECT m.id, m.score, m.why_text, m.recommendation, j.title, j.company, j.city, j.work_mode, j.salary_raw,
+    `SELECT m.id, m.score, m.why_text, m.recommendation, m.ats_before, m.ats_after, j.title, j.company, j.city, j.work_mode, j.salary_raw,
             j.apply_url, j.final_url, j.apply_route
        FROM job_matches m JOIN jobs j ON j.id = m.job_id
       WHERE m.run_id = ? AND m.decision IS NULL

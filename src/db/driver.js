@@ -389,6 +389,12 @@ const MIGRATIONS = [
   'ALTER TABLE apply_queue ADD COLUMN cv_b64 TEXT',
   // The employer posting an application goes to (ats:board:id), so one posting is applied to once.
   'ALTER TABLE apply_queue ADD COLUMN dest_key TEXT',
+  // The CV tailored for a match when its card is sent, with its ATS keyword scores, so the
+  // card shows the score of the exact CV the agent will send.
+  'ALTER TABLE job_matches ADD COLUMN ats_before INTEGER',
+  'ALTER TABLE job_matches ADD COLUMN ats_after INTEGER',
+  'ALTER TABLE job_matches ADD COLUMN tailor_added TEXT',
+  'ALTER TABLE job_matches ADD COLUMN tailored_cv_b64 TEXT',
 ];
 
 /* ------------------------------------------------------------------ */

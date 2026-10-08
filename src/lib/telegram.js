@@ -124,6 +124,10 @@ export function routeTag(m) {
   return r.route === 'auto' ? '⚡ <b>Auto-apply</b>\n' : '✋ <b>You apply</b> (the agent can\'t reach this form)\n';
 }
 
+/** "📄 ATS 44% → 78% with your tailored CV": the score of the exact CV the agent will send. */
+const atsLine = (m) => (m.ats_after != null ? `
+📄 ATS ${m.ats_before ?? '?'}% → <b>${m.ats_after}%</b> with your tailored CV` : '');
+
 function jobLine(m) {
   const where = m.city ? m.city.replace(/\b\w/g, (c) => c.toUpperCase()) : (m.work_mode || '');
   return `${routeTag(m)}<b>${h(m.title)}</b>\n${h(m.company)}${where ? ` · ${h(where)}` : ''}${m.salary_raw ? ` · ${h(m.salary_raw)}` : ''}`;
@@ -137,7 +141,7 @@ const jobButtons = (m) => [
 /** One job card with Approve / Skip / View buttons. */
 export function sendJobCard(chatId, m, { note } = {}) {
   const why = m.why_text ? `\n<i>${h(String(m.why_text).split('. ')[0].slice(0, 160))}</i>` : '';
-  return send(chatId, `${note ? `${h(note)}\n\n` : ''}${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${why}`, { buttons: jobButtons(m) });
+  return send(chatId, `${note ? `${h(note)}\n\n` : ''}${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${atsLine(m)}${why}`, { buttons: jobButtons(m) });
 }
 
 /**
@@ -156,7 +160,7 @@ export async function sendDigest(chatId, matches, { total, runId } = {}) {
   let sent = 0;
   for (const m of matches) {
     const why = m.why_text ? `\n<i>${h(String(m.why_text).split('. ')[0].slice(0, 160))}</i>` : '';
-    const r = await send(chatId, `${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${why}`, { buttons: jobButtons(m) });
+    const r = await send(chatId, `${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${atsLine(m)}${why}`, { buttons: jobButtons(m) });
     if (r.ok) sent++;
   }
   return { sent };
@@ -384,7 +388,7 @@ async function onCallback(cb) {
     : jobButtons(m);
   await tg('editMessageText', {
     chat_id: chatId, message_id: cb.message.message_id, parse_mode: 'HTML', disable_web_page_preview: true,
-    text: `${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${status}`,
+    text: `${jobLine(m)}\n<b>${Math.round(m.score)}% match</b>${atsLine(m)}${status}`,
     reply_markup: { inline_keyboard: buttons },
   });
   return answer(decision === 'approved' ? 'Approved ✓' : decision === 'skipped' ? 'Skipped' : 'Undone');

@@ -7,8 +7,11 @@
 import { ADAPTERS } from './adapters/index.js';
 import {
   candidateJobsForUser, insertMatch, matchesForRun, appliedSet,
-  startRun, finishRun, latestIngest, defaultResume, topMatchesForRun,
+  startRun, finishRun, latestIngest, defaultResume, topMatchesForRun, saveMatchTailoring,
 } from './db.js';
+import { db } from './db/driver.js';
+import { tailorResume } from './lib/tailor.js';
+import { mapLimit } from './lib/http.js';
 import { buildCorpus, buildSkillIDF, scoreJob, competitionSignal } from './score.js';
 import { verifyJobs, STATUS } from './verify.js';
 import { writeReport, buildRows } from './report.js';
@@ -30,6 +33,29 @@ import { telegramConfigured, sendDigest as sendTelegram } from './lib/telegram.j
 import { extractText } from './lib/resume.js';
 
 const log = (m) => console.log(`  match · ${m}`);
+
+/**
+ * Tailor the user's CV for each of these matches (cards about to be sent) and store it with
+ * its ATS keyword scores; the worker later sends this same CV. .docx CVs only. Returns how many.
+ */
+export async function pretailor(userId, profile, matches) {
+  if (!matches.length) return 0;
+  const cv = await defaultResume(userId);
+  if (!cv?.content_b64 || cv.kind === 'pdf') return 0;
+  const original = Buffer.from(cv.content_b64, 'base64');
+  const d = await db();
+  let n = 0;
+  await mapLimit(matches, 2, async (m) => {
+    try {
+      const job = await d.one('SELECT j.title, j.company, j.jd_text, j.skills_required FROM job_matches x JOIN jobs j ON j.id = x.job_id WHERE x.id = ?', [m.id]);
+      const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
+      if (!t.ok) return;
+      await saveMatchTailoring(m.id, { before: t.ats?.before, after: t.ats?.after, added: t.added, buffer: t.buffer });
+      n++;
+    } catch (err) { log(`${userId}: tailoring for card ${m.id} failed: ${err.message}`); }
+  });
+  return n;
+}
 
 /**
  * Match one user against the shared pool.
@@ -173,8 +199,12 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   let digest = { sent: false, reason: 'email disabled for this run' };
   if (email) digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
 
-  // Telegram: top matches with one-tap Approve / Skip.
+  // Telegram: top matches with one-tap Approve / Skip. The CV for each auto-apply card is
+  // tailored now, so the card shows the ATS score of the exact CV the agent will send.
   if (email && profile.telegram?.chatId && telegramConfigured()) {
+    const top = await topMatchesForRun(runId, 5);
+    const n = await pretailor(userId, profile, top.filter((m) => /"route":"auto"/.test(m.apply_route || '')));
+    if (n) log(`${userId}: tailored ${n} CV(s) for the cards`);
     const tgOut = await sendTelegram(profile.telegram.chatId, await topMatchesForRun(runId, 5), { total: picked.length, runId });
     log(`${userId}: telegram ${tgOut.sent} sent${tgOut.error ? ` (${tgOut.error})` : ''}`);
   }
