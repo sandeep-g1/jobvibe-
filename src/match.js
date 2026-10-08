@@ -8,7 +8,7 @@ import { ADAPTERS } from './adapters/index.js';
 import {
   candidateJobsForUser, insertMatch, matchesForRun, appliedSet,
   startRun, finishRun, latestIngest, defaultResume, topMatchesForRun, saveMatchTailoring,
-  recentlyAppliedCompanies, companyKey,
+  recentlyAppliedCompanies, companyKey, setDecision,
 } from './db.js';
 import { db } from './db/driver.js';
 import { tailorResume } from './lib/tailor.js';
@@ -30,7 +30,7 @@ function quickAuto(job) {
   if (AUTO_ATS.includes(job.source) || AUTO_ATS.includes(atsOfUrl(job.final_url || job.apply_url))) return true;
   try { return JSON.parse(job.apply_route || '{}').route === 'auto'; } catch { return false; }
 }
-import { telegramConfigured, sendDigest as sendTelegram } from './lib/telegram.js';
+import { telegramConfigured, sendDigest as sendTelegram, send as sendTelegramText } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
 
 const log = (m) => console.log(`  match · ${m}`);
@@ -210,9 +210,19 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   let digest = { sent: false, reason: 'email disabled for this run' };
   if (email) digest = await sendDigest(buildRows(rows, applied), { profile, runId, siteUrl });
 
-  // Telegram: top matches with one-tap Approve / Skip. The CV for each auto-apply card is
-  // tailored now, so the card shows the ATS score of the exact CV the agent will send.
-  if (email && profile.telegram?.chatId && telegramConfigured()) {
+  // Auto mode (profile.autoApply): no approval step. Every picked job is approved now; the
+  // worker applies to the ones it can reach and sends the rest as "apply yourself" with the
+  // tailored CV. Telegram gets one summary instead of approval cards.
+  if (profile.autoApply) {
+    for (const s of picked) {
+      const m = rows.find((x) => x.fingerprint === s.job.fingerprint);
+      if (m) await setDecision(m.id, userId, 'approved');
+    }
+    if (email && profile.telegram?.chatId && telegramConfigured()) {
+      const nAuto = picked.filter((s) => s.auto).length;
+      await sendTelegramText(profile.telegram.chatId, `🤖 <b>${picked.length} new job${picked.length === 1 ? '' : 's'} today.</b> Applying to ${nAuto} on its own, with a CV tailored to each; ${picked.length - nAuto} you'll get to apply yourself with the CV attached. I'll report each one.`);
+    }
+  } else if (email && profile.telegram?.chatId && telegramConfigured()) {
     const top = await topMatchesForRun(runId, 5);
     const n = await pretailor(userId, profile, top.filter((m) => /"route":"auto"/.test(m.apply_route || '')));
     if (n) log(`${userId}: tailored ${n} CV(s) for the cards`);

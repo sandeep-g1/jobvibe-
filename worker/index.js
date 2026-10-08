@@ -383,8 +383,8 @@ async function main() {
     // Code changed on disk (a fix was made): stop between jobs, so worker/always-on.ps1
     // starts the new version. Running Node never picks up edits by itself.
     if (codeStamp() > codeAtStart) { log('code updated: restarting with the new version'); await browser.close().catch(() => {}); process.exit(0); }
-    // 60-120 s between applications so employers aren't hit in bursts.
-    await new Promise((r) => setTimeout(r, 60000 + Math.floor(Math.random() * 60000)));
+    // 30-60 s between applications: about 25 a day fit easily, and employers aren't hit in bursts.
+    await new Promise((r) => setTimeout(r, 30000 + Math.floor(Math.random() * 30000)));
   }
 }
 
