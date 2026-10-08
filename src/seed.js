@@ -21,6 +21,11 @@ function countIndia(adapterId, jobs) {
     if (adapterId === 'greenhouse') location = j.location?.name || '';
     else if (adapterId === 'lever') location = j.categories?.location || '';
     else if (adapterId === 'ashby') { location = j.location || ''; isRemote = j.isRemote === true; }
+    else if (adapterId === 'keka') {
+      location = (j.jobLocations || []).map((l) => l.city || l.name).join(', ');
+      country = (j.jobLocations || [])[0]?.countryCode || null;
+    }
+    else if (adapterId === 'zohorecruit') { location = [j.City, j.Country].filter(Boolean).join(', '); country = j.Country || null; isRemote = j.Remote_Job === true; }
     else if (adapterId === 'smartrecruiters') {
       location = j.location?.fullLocation || '';
       country = j.location?.country || 'in';

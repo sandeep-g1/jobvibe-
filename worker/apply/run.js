@@ -151,6 +151,12 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       if (CLOSED.test(text)) return { status: 'closed', reason: 'the employer has closed this job', url };
       return { status: 'failed', reason: 'no application form found on the page', url };
     }
+    // A typed CAPTCHA ("Type the text in the image", Keka, Zoho Recruit): a person must submit
+    // this form. Hand it over before filling anything; never ask the user about the box.
+    const typedCaptcha = await page.evaluate(() => [...document.querySelectorAll('input')]
+      .some((el) => el.getClientRects().length && /captcha|image text|text in the image|security text/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute('aria-label') || ''}`)))
+      .catch(() => false);
+    if (typedCaptcha) return { status: 'captcha', reason: 'the application form has a CAPTCHA', url };
 
     // 1. Decide every answer before touching the page.
     const plan = [];

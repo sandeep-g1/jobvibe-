@@ -13,20 +13,24 @@
 // Results are cached on jobs.apply_route for a week.
 import { db } from '../db/driver.js';
 import { resolveJob, COUNTRY_WORDS } from './geo.js';
+import * as kekaAdapter from '../adapters/keka.js';
 
 // SmartRecruiters is not here: its application form sits behind DataDome bot
 // protection, which blocks automated browsers. We don't work around bot checks,
 // so SmartRecruiters jobs are "you apply".
 // Workday: one candidate account per employer, created by the agent on the user's job-hunt email.
 export const AUTO_ATS = ['greenhouse', 'lever', 'ashby', 'workable', 'recruitee', 'workday'];
-const BOT_PROTECTED = new Set(['smartrecruiters']);
+const BOT_PROTECTED = new Set(['smartrecruiters', 'zohorecruit', 'keka']);
+// Why each one can't be applied to automatically (shown to the user).
+const BLOCK_REASON = { smartrecruiters: 'blocks automated applications (bot protection)', zohorecruit: 'its application form has a CAPTCHA', keka: 'its application form has a CAPTCHA' };
 const CACHE_DAYS = 7;
-const ROUTE_V = 3; // v2: exact posting + location (v1 matched titles loosely); v3: Workday is auto
+const ROUTE_V = 4; // v2: exact posting + location (v1 matched titles loosely); v3: Workday is auto; v4: Keka, Zoho Recruit
 
 const HOSTS = {
   greenhouse: /(^|\.)greenhouse\.io$/, lever: /(^|\.)lever\.co$/, ashby: /(^|\.)ashbyhq\.com$/,
   smartrecruiters: /(^|\.)smartrecruiters\.com$/, workable: /(^|\.)workable\.com$/, recruitee: /(^|\.)recruitee\.com$/,
   workday: /(^|\.)myworkdayjobs\.com$/,
+  keka: /(^|\.)keka\.com$/, zohorecruit: /(^|\.)zohorecruit\.(in|com)$/,
 };
 export function atsOfUrl(url) {
   try { const h = new URL(url).hostname; return Object.entries(HOSTS).find(([, re]) => re.test(h))?.[0] || null; } catch { return null; }
@@ -176,6 +180,11 @@ const BOARDS = {
     const places = (o.locations?.length ? o.locations : [o]).map((l) => [l.city, l.country].filter(Boolean).join(', ')).filter(Boolean);
     return { title: o.title, url: o.careers_url, remote: !!o.remote, location: places.length ? joinLoc(places) : o.location || '', text: `${o.description || ''} ${o.requirements || ''}` };
   }),
+  // Keka career sites (Indian employers): the site's own job list, full JD included.
+  keka: async (s) => {
+    const r = await kekaAdapter.probe(s).catch(() => ({ live: false }));
+    return r.live ? r.jobs.map((j) => ({ title: j.title, url: `https://${s}.keka.com/careers/jobdetails/${j.id}`, location: kekaAdapter.kekaLocation(j), text: j.description || '' })) : null;
+  },
   smartrecruiters: async (s) => (await get(`https://api.smartrecruiters.com/v1/companies/${s}/postings?limit=100`))?.content
     ?.map((p) => ({ title: p.name, url: `https://jobs.smartrecruiters.com/${s}/${p.id}`, location: [p.location?.city, p.location?.country].filter(Boolean).join(', '), remote: !!p.location?.remote })),
 };
@@ -221,7 +230,7 @@ export async function discoverOnBoards(job) {
     }
     if (!postings.length) continue; // not this slug
     const c = await choose(job, postings);
-    if (c.pick && BOT_PROTECTED.has(c.pick.ats)) return { reason: `${c.pick.ats} blocks automated applications (bot protection)` };
+    if (c.pick && BOT_PROTECTED.has(c.pick.ats)) return { reason: `${c.pick.ats}: ${BLOCK_REASON[c.pick.ats]}` };
     return c; // found the employer under this slug
   }
   return { reason: null };
@@ -266,7 +275,7 @@ export async function resolveApplyRoute(job, { live = true } = {}) {
   const ownAts = atsOfUrl(own);
   let out;
   if (BOT_PROTECTED.has(ownAts) || BOT_PROTECTED.has(job.source)) {
-    out = { route: 'manual', reason: `${ownAts || job.source} blocks automated applications (bot protection)` };
+    out = { route: 'manual', reason: `${ownAts || job.source}: ${BLOCK_REASON[ownAts] || BLOCK_REASON[job.source] || 'blocks automated applications'}` };
   } else if (AUTO_ATS.includes(job.source) || ownAts) {
     out = { route: 'auto', ats: ownAts || job.source, url: own, via: 'job link' };
   } else {

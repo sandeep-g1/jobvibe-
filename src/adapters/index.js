@@ -19,9 +19,11 @@ import * as jsearch from './jsearch.js';
 import * as himalayas from './himalayas.js';
 import * as cutshort from './cutshort.js';
 import * as workday from './workday.js';
+import * as keka from './keka.js';
+import * as zohorecruit from './zohorecruit.js';
 
 export const ADAPTERS = {
-  greenhouse, lever, ashby, smartrecruiters,
+  greenhouse, lever, ashby, smartrecruiters, keka, zohorecruit,
   adzuna, jooble, careerjet, jsearch, himalayas, cutshort, workday,
 };
 

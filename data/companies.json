@@ -3387,5 +3387,181 @@
       "name": "Prudential",
       "slug": "Prudential"
     }
+  ],
+  "keka": [
+    {
+      "name": "Kuku FM",
+      "slug": "kukufm"
+    },
+    {
+      "name": "Cars24",
+      "slug": "cars24"
+    },
+    {
+      "name": "SmartDocs",
+      "slug": "smartdocs"
+    },
+    {
+      "name": "PeopleLogic Business Solutions (P) Ltd.",
+      "slug": "peoplelogic"
+    },
+    {
+      "name": "Signzy Tech",
+      "slug": "signzy"
+    },
+    {
+      "name": "Teachmint",
+      "slug": "teachmint"
+    },
+    {
+      "name": "Tradelab Technologies",
+      "slug": "tradelab"
+    },
+    {
+      "name": "Skit",
+      "slug": "skit"
+    },
+    {
+      "name": "CLOUDSUFI",
+      "slug": "cloudsufi"
+    },
+    {
+      "name": "Bolt",
+      "slug": "bolt"
+    },
+    {
+      "name": "NonStop Io Technologies Pvt Ltd",
+      "slug": "nonstopio"
+    },
+    {
+      "name": "Nyusoft Solutions",
+      "slug": "nyusoft"
+    },
+    {
+      "name": "Nurix AI",
+      "slug": "nurix"
+    },
+    {
+      "name": "Jupiter",
+      "slug": "jupiter"
+    },
+    {
+      "name": "ITech Ecommerce Pvt Ltd",
+      "slug": "itech"
+    },
+    {
+      "name": "Zluri Tech",
+      "slug": "zluri"
+    },
+    {
+      "name": "Nova Benefits",
+      "slug": "nova"
+    },
+    {
+      "name": "Moolya Software Testing Private Limited",
+      "slug": "moolya"
+    }
+  ],
+  "zohorecruit": [
+    {
+      "name": "Pickyourtrail",
+      "slug": "pickyourtrail.zohorecruit.com"
+    },
+    {
+      "name": "Arting Digital",
+      "slug": "artingdigital.zohorecruit.in"
+    },
+    {
+      "name": "Wissen Technology",
+      "slug": "wissen.zohorecruit.in"
+    },
+    {
+      "name": "Finkraft",
+      "slug": "finkraft.zohorecruit.com"
+    },
+    {
+      "name": "Cibirix",
+      "slug": "cibirix.zohorecruit.com"
+    },
+    {
+      "name": "Binary Web Solutions India",
+      "slug": "career.zohorecruit.com"
+    },
+    {
+      "name": "Rapyder Cloud Solutions",
+      "slug": "rapyder.zohorecruit.com"
+    },
+    {
+      "name": "Genzeon Corporation",
+      "slug": "genzeon.zohorecruit.com"
+    },
+    {
+      "name": "MyOperator",
+      "slug": "myoperator.zohorecruit.in"
+    },
+    {
+      "name": "Medha",
+      "slug": "medha.zohorecruit.com"
+    },
+    {
+      "name": "MaxVal Group",
+      "slug": "maxval.zohorecruit.in"
+    },
+    {
+      "name": "Nova Benefits",
+      "slug": "novabenefits.zohorecruit.in"
+    },
+    {
+      "name": "Qure.Ai",
+      "slug": "qure.zohorecruit.in"
+    },
+    {
+      "name": "Technoidentity",
+      "slug": "technoidentity.zohorecruit.com"
+    },
+    {
+      "name": "Rigel Networks Pvt Ltd",
+      "slug": "rigelnetworks.zohorecruit.com"
+    },
+    {
+      "name": "Moving Walls",
+      "slug": "movingwalls.zohorecruit.com"
+    },
+    {
+      "name": "GEVME",
+      "slug": "gevme.zohorecruit.com"
+    },
+    {
+      "name": "Onsurity Health",
+      "slug": "onsurity.zohorecruit.in"
+    },
+    {
+      "name": "Moon Technolabs Pvt. Ltd.",
+      "slug": "moontechnolabs.zohorecruit.com"
+    },
+    {
+      "name": "Plivo",
+      "slug": "plivo.zohorecruit.com"
+    },
+    {
+      "name": "Heineken Business Services India",
+      "slug": "heineken.zohorecruit.in"
+    },
+    {
+      "name": "Deutsche Consulting",
+      "slug": "deutsche.zohorecruit.in"
+    },
+    {
+      "name": "Condé Nast Technology Lab",
+      "slug": "condenast.zohorecruit.in"
+    },
+    {
+      "name": "TalentXO",
+      "slug": "talentxo.zohorecruit.com"
+    },
+    {
+      "name": "Pickyourtrail",
+      "slug": "pickyourtrail.zohorecruit.in"
+    }
   ]
 }

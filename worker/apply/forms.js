@@ -14,6 +14,8 @@ export const ATS = {
   workday: /(^|\.)myworkdayjobs\.com$/,
   recruitee: /(^|\.)recruitee\.com$/,
   workable: /(^|\.)workable\.com$/,
+  keka: /(^|\.)keka\.com$/,
+  zohorecruit: /(^|\.)zohorecruit\.(in|com)$/,
 };
 
 export function atsOf(url) {
@@ -55,6 +57,8 @@ export function formUrl(url, ats) {
   }
   // Recruitee: the offer page links to its application form at /o/<offer>/c/new.
   if (ats === 'recruitee') { const m = u.pathname.match(/^\/o\/[^/]+/); if (m) return `${u.origin}${m[0]}/c/new`; }
+  // Keka: the job page (/careers/jobdetails/{id}) has the form at /careers/applyjob/{id}.
+  if (ats === 'keka') return u.href.replace('/careers/jobdetails/', '/careers/applyjob/');
   if (ats === 'lever') return u.pathname.endsWith('/apply') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/apply`;
   if (ats === 'ashby') return u.pathname.endsWith('/application') ? u.href : `${u.origin}${u.pathname.replace(/\/+$/, '')}/application`;
   return u.href;
