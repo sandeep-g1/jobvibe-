@@ -41,6 +41,9 @@ const argv = process.argv.slice(2);
 const ONCE = argv.includes('--once');
 const DRY = argv.includes('--dry-run');
 const HEADED = argv.includes('--headed');
+// --skip-ats workday[,…]: leave jobs on these systems queued for another worker
+// (e.g. account-based Workday, run only from a worker its owner starts).
+const SKIP_ATS = new Set(argv.includes('--skip-ats') ? String(argv[argv.indexOf('--skip-ats') + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : []);
 const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby', 'recruitee', 'workday']);
 const DEFAULT_DAILY_CAP = 10;
 const LOCK = join(tmpdir(), 'jobvibe-worker.lock');
@@ -297,13 +300,24 @@ async function unblockReady() {
   }
 }
 
+/** The oldest queued item this worker handles (jobs on skipped systems stay queued). */
+async function nextAllowed() {
+  const items = await nextQueued(SKIP_ATS.size ? 50 : 1);
+  for (const it of items) {
+    if (!SKIP_ATS.size) return it;
+    const job = await loadJob(it.match_id);
+    if (!job || !SKIP_ATS.has(atsOf(job.url))) return it;
+  }
+  return null;
+}
+
 async function tick(browser) {
   const added = await enqueueApproved();
   if (added) log(`queued ${added} newly approved job(s)`);
   await unblockReady();
   let done = 0;
   for (;;) {
-    const [item] = await nextQueued(1);
+    const item = await nextAllowed();
     if (!item) break;
     await updateQueueItem(item.id, { status: 'running', reason: null, detail: item.detail });
     let out;
@@ -329,7 +343,7 @@ async function main() {
     if (n) { await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL WHERE status = 'dry_run'`); log(`${n} test-run job(s) queued to apply for real`); }
   }
   const browser = await chromium.launch({ headless: !HEADED });
-  log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}`);
+  log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}${SKIP_ATS.size ? `, leaving ${[...SKIP_ATS].join('/')} jobs to another worker` : ''}`);
   if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
   const codeAtStart = codeStamp();
   for (;;) {
