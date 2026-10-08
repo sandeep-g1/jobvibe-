@@ -125,7 +125,11 @@ STEP 2. Rewrite ONLY the editable lines below (by id). Rules:
   ${yearsExp != null ? `state experience as ${yearsExp} years,` : 'keep the experience years as written,'}
   and work in 5-8 JD keywords the candidate genuinely has. 2-4 sentences.
 - SKILLS lines: keep each line's label and format (e.g. "•  Label: a, b, c"). Put JD keywords first. Add a
-  JD keyword when the CV shows that experience anywhere${allowed.length ? ', or when it is in ALLOWED ADDITIONS' : ''}.
+  JD keyword when the CV shows that experience anywhere${allowed.length ? ', or when it is in ALLOWED ADDITIONS. Every ALLOWED ADDITION must appear at least once, in a skills line or the summary' : ''}.
+- Use the JD's EXACT phrase for things the candidate already does: ATS tools match words, not meaning.
+  Practices of a method the candidate uses count as shown: Agile/Scrum -> "sprint planning", "backlog
+  refinement", "user stories", "retrospectives"; requirements/UAT work -> "release notes", "user guides",
+  "test cases", "product requirements". Work them into bullets about that same work.
 - EXPERIENCE and PROJECT bullets: rewrite to mirror the JD's language for the same work. Keep EVERY number,
   percentage, client, system and fact. Start with a plain strong verb. Similar length (may grow up to a third).
 - Return each line's leading bullet characters exactly as given.

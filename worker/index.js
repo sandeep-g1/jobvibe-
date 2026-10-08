@@ -89,6 +89,16 @@ const notifyFile = async (profile, file) => {
   if (telegramConfigured() && profile.telegram?.chatId) await sendFile(profile.telegram.chatId, file);
 };
 
+/** "ATS keywords 41% → 78%. Added for this job (brush up before an interview): Confluence (from your Jira)…" */
+function tailorNote(t) {
+  if (!t) return '';
+  const ats = t.ats && t.ats.after != null ? `
+CV matched to the job: ATS keywords ${t.ats.before}% → ${t.ats.after}%.` : '';
+  const added = t.added?.length ? `
+Added for this job, based on related experience (brush up before an interview): ${t.added.map((a) => `<b>${h(a.skill)}</b> (from your ${h(a.basedOn)})`).join(', ')}.` : '';
+  return ats + added;
+}
+
 /* ---------------- Workday accounts ---------------- */
 // One candidate account per employer's Workday site, on her job-hunt email, with a
 // generated password stored encrypted on her profile (profile.workdayAccounts[site]).
@@ -175,9 +185,10 @@ async function processItem(item, browser) {
   const ext = cvRow.kind === 'pdf' ? 'pdf' : 'docx';
   let cv = original;
   let tailored = false;
+  let tailoring = null; // { ats: {before, after}, added: [{skill, basedOn}] } when tailored
   if (ext === 'docx') {
     const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
-    if (t.ok) { cv = t.buffer; tailored = true; }
+    if (t.ok) { cv = t.buffer; tailored = true; tailoring = { ats: t.ats ? { before: t.ats.before, after: t.ats.after } : null, added: t.added || [] }; }
   }
   // What the employer receives: "<Name>_CV.docx", with her name in the file's properties.
   if (ext === 'docx') cv = await ownDocx(cv, profile.name);
@@ -245,9 +256,9 @@ async function processItem(item, browser) {
   }
   if (r.status === 'submitted') {
     await markApplied(item.fingerprint, item.user_id);
-    await notify(profile, `✅ Applied to ${label}${tailored ? ' with a tailored CV' : ''}.`);
+    await notify(profile, `✅ Applied to ${label}${tailored ? ' with a tailored CV' : ''}.${tailorNote(tailoring)}`);
     if (r.screenshot) await notifyFile(profile, { kind: 'photo', buffer: r.screenshot, filename: 'receipt.png', caption: `Receipt: ${h(job.title)} at ${h(job.company)}` });
-    return save('submitted', null, { filled, tailored, evidence: r.evidence });
+    return save('submitted', null, { filled, tailored, tailoring, evidence: r.evidence });
   }
   if (r.status === 'captcha') {
     await notify(profile, `🧩 Almost done: ${label} asked for a human check (CAPTCHA), which only you can do.\n<a href="${h(job.url)}">Open the application</a> and submit. Your ${tailored ? 'tailored ' : ''}CV is attached.`);

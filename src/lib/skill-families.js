@@ -31,6 +31,22 @@ export const FAMILIES = [
   ['General Ledger', 'Accounts Payable', 'Accounts Receivable', 'Financial Reporting'],
 ];
 
+// Same suite: the tools are used together (Jira teams document in Confluence).
+FAMILIES.push(['JIRA', 'Confluence']);
+
+/**
+ * Same field, one way: the JD skill rests on work the candidate has done in the same
+ * field (the user's rule: "worked on Azure and they ask AWS: add it"). Wider than a
+ * vendor family, so these are always reported back as "prepare before interview".
+ */
+export const SAME_FIELD = {
+  SQL: ['Power BI', 'Business Intelligence', 'Data Analysis', 'Data Visualization', 'Tableau', 'Looker', 'Qlik'],
+  Documentation: ['Requirement Gathering', 'Business Analysis', 'Testing', 'User Acceptance Testing (UAT)'],
+  'Product Management': ['Business Analysis', 'Requirement Gathering', 'Product Owner'],
+  Scrum: ['Agile', 'Agile Project Management'],
+  Kanban: ['Agile', 'Agile Project Management'],
+};
+
 const FAMILY_OF = new Map();
 for (const fam of FAMILIES) {
   for (const s of fam) {
@@ -38,6 +54,11 @@ for (const fam of FAMILIES) {
     fam.forEach((x) => x !== s && set.add(x));
     FAMILY_OF.set(s, set);
   }
+}
+for (const [skill, bases] of Object.entries(SAME_FIELD)) {
+  const set = FAMILY_OF.get(skill) || new Set();
+  bases.forEach((b) => set.add(canonicalize(b) || b));
+  FAMILY_OF.set(skill, set);
 }
 
 /** Skills the candidate may claim by adjacency: JD skill -> candidate skill it rests on. */
