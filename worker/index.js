@@ -41,6 +41,9 @@ const argv = process.argv.slice(2);
 const ONCE = argv.includes('--once');
 const DRY = argv.includes('--dry-run');
 const HEADED = argv.includes('--headed');
+// Forms with a CAPTCHA (Keka, Zoho Recruit): fill them in a visible window on this PC and
+// let the user type the CAPTCHA and press Submit. --no-assist where there is no screen.
+const ASSIST = new Set(argv.includes('--no-assist') ? [] : ['keka', 'zohorecruit']);
 // --skip-ats workday[,…]: leave jobs on these systems queued for another worker
 // (e.g. account-based Workday, run only from a worker its owner starts).
 const SKIP_ATS = new Set(argv.includes('--skip-ats') ? String(argv[argv.indexOf('--skip-ats') + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -97,6 +100,17 @@ CV matched to the job: ATS keywords ${t.ats.before}% → ${t.ats.after}%.` : '';
   const added = t.added?.length ? `
 Added for this job, based on related experience (brush up before an interview): ${t.added.map((a) => `<b>${h(a.skill)}</b> (from your ${h(a.basedOn)})`).join(', ')}.` : '';
   return ats + added;
+}
+
+/** A CAPTCHA form: filled in a visible window here; she types the CAPTCHA and submits. */
+async function applyAssisted({ job, profile, cv, cvName, cvText, label }) {
+  const visible = await chromium.launch({ headless: false });
+  try {
+    return await applyOne({ browser: visible, visibleBrowser: visible, job, profile, cv, cvName, cvText, dryRun: DRY,
+      onYourTurn: () => notify(profile, `🖐 <b>Your turn:</b> ${label} is filled in the browser window on the PC. Type the CAPTCHA there and press <b>Submit</b>; I'll confirm when it goes through. (I'll wait 15 minutes.)`) });
+  } finally {
+    await visible.close().catch(() => {});
+  }
 }
 
 /* ---------------- Workday accounts ---------------- */
@@ -157,7 +171,8 @@ async function processItem(item, browser) {
   const generic = process.env.WORKER_ALLOW_GENERIC === '1' && /^https?:\/\/(localhost|127\.0\.0\.1)/.test(job.url);
   let ats = atsOf(job.url);
   let manualWhy = null;
-  if (!generic && !SUPPORTED.has(ats)) {
+  const assisted = ASSIST.has(ats) && profile.assistCaptcha !== false;
+  if (!generic && !SUPPORTED.has(ats) && !assisted) {
     const route = await resolveApplyRoute(job);
     if (route.route === 'auto' && SUPPORTED.has(route.ats)) {
       job.url = route.url; ats = route.ats;
@@ -229,7 +244,8 @@ async function processItem(item, browser) {
   const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
   const r = ats === 'workday'
     ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, ...workdayAccount(item.user_id, profile, job.url) })
-    : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
+    : assisted ? await applyAssisted({ job, profile, cv, cvName, cvText, label })
+      : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
   if (r.status === 'manual') {

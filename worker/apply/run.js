@@ -109,10 +109,12 @@ async function findSubmit(page) {
 async function openForm(page, url) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(3500);
+  // Cookie banners can cover the form: decline non-essential cookies.
+  await page.locator('a, button').filter({ hasText: /^\s*(decline non-essential|reject all|decline all|reject non-essential)\s*$/i }).first().click({ timeout: 2000 }).catch(() => {});
   let fields = await extractFields(page);
   // Some boards show the description first and the form behind an "Apply" button.
   if (!fields.some((f) => f.type === 'file' || /email/i.test(f.label))) {
-    const btn = page.locator('a, button').filter({ hasText: /^\s*apply( (now|for this job))?\s*$/i }).first();
+    const btn = page.locator('a, button').filter({ hasText: /^\s*(apply( (now|for this job))?|i'?m interested)\s*$/i }).first();
     if (await btn.count()) { await btn.click().catch(() => {}); await page.waitForTimeout(3000); fields = await extractFields(page); }
   }
   return fields;
@@ -128,7 +130,13 @@ async function openForm(page, url) {
  * @param {string} o.cvText   plain CV text (for essays)
  * @param {boolean} o.dryRun  fill but never submit
  */
-export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true, getEmailCode = null }) {
+/**
+ * …plus, for forms with a CAPTCHA (assisted mode):
+ * @param {import('playwright').Browser} [o.visibleBrowser]  a browser window on the user's screen: the agent
+ *        fills the form there, the user types the CAPTCHA and presses Submit, the agent watches for the confirmation
+ * @param {Function} [o.onYourTurn]  called once the form is filled and waiting for the user
+ */
+export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true, getEmailCode = null, visibleBrowser = null, onYourTurn = null }) {
   const ats = atsOf(job.url);
   const url = formUrl(job.url, ats);
   const dir = join(tmpdir(), 'jobvibe-apply', safe(`${job.company}_${job.title}`));
@@ -136,7 +144,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
   const cvPath = join(dir, cvName || 'Resume.docx');
   writeFileSync(cvPath, cv);
 
-  const context = await browser.newContext({ locale: 'en-IN', timezoneId: 'Asia/Kolkata', viewport: { width: 1366, height: 900 } });
+  const context = await (visibleBrowser || browser).newContext({ locale: 'en-IN', timezoneId: 'Asia/Kolkata', viewport: { width: 1366, height: 900 } });
   const page = await context.newPage();
   const log = [];
   let clicked = false;
@@ -156,13 +164,15 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const typedCaptcha = await page.evaluate(() => [...document.querySelectorAll('input')]
       .some((el) => el.getClientRects().length && /captcha|image text|text in the image|security text/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute('aria-label') || ''}`)))
       .catch(() => false);
-    if (typedCaptcha) return { status: 'captcha', reason: 'the application form has a CAPTCHA', url };
+    if (typedCaptcha && !visibleBrowser) return { status: 'captcha', reason: 'the application form has a CAPTCHA', url };
+    const humanSubmits = typedCaptcha && !!visibleBrowser; // assisted: she types the CAPTCHA and submits
 
     // 1. Decide every answer before touching the page.
     const plan = [];
     const ask = [];
     const noGo = [];
     for (const f of fields) {
+      if (/captcha/i.test(`${f.id} ${f.selector} ${f.label}`)) continue; // the person types this one
       // A lone checkbox whose "label" swallowed half the form ("First Name* Last Name* Email*…"):
       // its own text is the real question.
       if (f.type === 'checkbox' && f.options?.length === 1 && (f.label.length > 200 || (f.label.match(/\*/g) || []).length >= 3)) f.label = f.options[0];
@@ -220,6 +230,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const empty = await page.evaluate(() => [...document.querySelectorAll('input, select, textarea')]
       .filter((el) => el.required || el.getAttribute('aria-required') === 'true')
       .filter((el) => el.offsetParent !== null && el.type !== 'file' && el.type !== 'hidden')
+      .filter((el) => !/captcha/i.test(`${el.name} ${el.id} ${el.placeholder}`)) // typed by the person
       .filter((el) => {
         if (el.type === 'checkbox' || el.type === 'radio') return !document.querySelector(`input[name="${CSS.escape(el.name)}"]:checked`);
         // Searchable dropdown: its text box stays empty; the chosen value shows next to it.
@@ -236,6 +247,26 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     const screenshot = await page.screenshot({ fullPage: true });
     const filled = plan.map((s) => ({ label: s.f.label, value: s.f.type === 'file' ? `[file] ${s.source}` : String(s.value).slice(0, 200), source: s.source }));
     if (dryRun) return { status: 'dry_run', url, filled, screenshot, log };
+
+    // 4a. Assisted: the person types the CAPTCHA and presses Submit; watch for the confirmation.
+    if (humanSubmits) {
+      const startUrl = page.url();
+      const seen = new Set((await page.evaluate(() => document.body.innerText).catch(() => '')).split('\n').map((x) => x.trim()));
+      await page.bringToFront().catch(() => {});
+      if (onYourTurn) await onYourTurn();
+      clicked = true; // from here on the person may have submitted: never auto-retry
+      const until = Date.now() + 15 * 60000;
+      while (Date.now() < until) {
+        await page.waitForTimeout(3000);
+        if (page.isClosed()) return { status: 'unconfirmed', reason: 'the browser window was closed before a confirmation showed', url, filled, clicked };
+        const fresh = (await page.evaluate(() => document.body.innerText).catch(() => '')).split('\n').map((x) => x.trim()).filter((x) => x && !seen.has(x));
+        const line = fresh.find((l) => CONFIRM.test(l));
+        if (line || (page.url() !== startUrl && /confirm|thank|success|submitted/i.test(page.url()))) {
+          return { status: 'submitted', url, filled, evidence: { url: page.url(), text: (line || '').slice(0, 300), at: new Date().toISOString(), assisted: true }, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
+        }
+      }
+      return { status: 'captcha', reason: 'not submitted within 15 minutes (CAPTCHA left for you)', url, filled, clicked: false };
+    }
 
     // 4. Submit and read the outcome.
     const btn = await findSubmit(page);
