@@ -468,10 +468,41 @@ export async function claimDestination(id, userId, key) {
   return null;
 }
 
-/** "Apply anyway" on a job the agent judged the user ineligible for (owner-scoped). */
+const coKey = (s) => String(s || '').toLowerCase().replace(/\(.*?\)/g, ' ')
+  .replace(/\b(private|pvt|limited|ltd|inc|llc|corp|corporation|co|company|technologies|technology|tech|solutions|systems|services|group|india|global)\b\.?/g, ' ')
+  .replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * The user's application at this company in the last `days` days (applied, or possibly
+ * applied), other than queue item `exceptId`; null if none. One application per company.
+ */
+export async function recentApplicationAt(userId, company, exceptId = 0, days = 60) {
+  const d = await db();
+  const key = coKey(company);
+  if (!key) return null;
+  const rows = await d.query(
+    `SELECT q.id, q.status, q.updated_at, j.title, j.company FROM apply_queue q
+       JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? AND q.id != ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
+    [userId, exceptId, new Date(Date.now() - days * 86400000).toISOString()]);
+  return rows.find((r) => coKey(r.company) === key) || null;
+}
+
+/** Companies the user applied to in the last `days` days (normalised names), for the matcher. */
+export async function recentlyAppliedCompanies(userId, days = 60) {
+  const d = await db();
+  const rows = await d.query(
+    `SELECT DISTINCT j.company FROM apply_queue q JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
+      WHERE q.user_id = ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
+    [userId, new Date(Date.now() - days * 86400000).toISOString()]);
+  return new Set(rows.map((r) => coKey(r.company)).filter(Boolean));
+}
+export { coKey as companyKey };
+
+/** "Apply anyway" on a job the agent held back: judged ineligible, or a second job at one company (owner-scoped). */
 export async function overrideIneligible(id, userId) {
   const d = await db();
-  const row = await d.one(`SELECT id, detail FROM apply_queue WHERE id = ? AND user_id = ? AND status = 'ineligible'`, [id, userId]);
+  const row = await d.one(`SELECT id, detail FROM apply_queue WHERE id = ? AND user_id = ? AND status IN ('ineligible', 'held')`, [id, userId]);
   if (!row) return false;
   const detail = { ...JSON.parse(row.detail || '{}'), override: true };
   await d.run(`UPDATE apply_queue SET status = 'queued', reason = NULL, detail = ?, updated_at = ? WHERE id = ?`, [JSON.stringify(detail), now(), id]);

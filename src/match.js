@@ -8,6 +8,7 @@ import { ADAPTERS } from './adapters/index.js';
 import {
   candidateJobsForUser, insertMatch, matchesForRun, appliedSet,
   startRun, finishRun, latestIngest, defaultResume, topMatchesForRun, saveMatchTailoring,
+  recentlyAppliedCompanies, companyKey,
 } from './db.js';
 import { db } from './db/driver.js';
 import { tailorResume } from './lib/tailor.js';
@@ -150,7 +151,17 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
     await verifyJobs(needCheck, trust);
   }
 
-  const living = candidates.filter((s) => s.job.link_status !== STATUS.DEAD);
+  // One job per company: none where she applied in the last 60 days (recruiters see every
+  // application together), and only the best-fitting one per company in a run.
+  const appliedCos = await recentlyAppliedCompanies(userId);
+  const seenCo = new Set();
+  const living = candidates.filter((s) => s.job.link_status !== STATUS.DEAD).filter((s) => {
+    const k = companyKey(s.job.company);
+    if (!k) return true;
+    if (appliedCos.has(k) || seenCo.has(k)) return false;
+    seenCo.add(k);
+    return true;
+  });
 
   // Strong aggregator jobs (Himalayas, Cutshort…): look for the same role on the employer's own form.
   let upgrades = 0;

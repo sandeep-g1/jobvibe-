@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
-  claimDestination, saveProfileRow, matchTailoring,
+  claimDestination, saveProfileRow, matchTailoring, recentApplicationAt,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
@@ -175,6 +175,19 @@ async function processItem(item, browser) {
   if (!manualWhy) {
     const dup = await claimDestination(item.id, item.user_id, destKey(job.url));
     if (dup) return save('already_applied', `same posting as "${dup.title}" at ${dup.company} (${dup.status})`);
+  }
+  // One application per company at a time: recruiters see every application together, and
+  // two CVs tailored to different roles look inconsistent. Held, with "Apply anyway".
+  if (!detail.override) {
+    const prior = await recentApplicationAt(item.user_id, job.company, item.id);
+    if (prior) {
+      const when = new Date(prior.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      if (telegramConfigured() && profile.telegram?.chatId) {
+        await send(profile.telegram.chatId, `⏸ I held ${label}: you already applied to <b>${h(job.company)}</b> for "${h(prior.title)}" on ${when}. One application per company keeps your profile consistent there (recruiters see all your applications, and each CV is tailored differently).\nTap <b>Apply anyway</b> if you really want this role too.`,
+          { buttons: [[{ text: '✅ Apply anyway', callback_data: `ov:${item.id}` }]] });
+      }
+      return save('held', `already applied to ${job.company} ("${prior.title}") on ${when}; one application per company`);
+    }
   }
   job.override = !!detail.override;
 
