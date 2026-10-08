@@ -13,6 +13,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanEnv } from '../db/driver.js';
 import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus, overrideIneligible } from '../db.js';
+import { DECLARATIONS } from './answers.js';
+import { parseAddress, parseSkillYears, missingItems, skillsToAsk } from './questionnaire.js';
 
 const token = () => cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
 export const telegramConfigured = () => !!token();
@@ -181,6 +183,39 @@ export async function askUser(userId, profile, question, { context, options = []
   return { ok: true, messageId: r.result.message_id };
 }
 
+/**
+ * Send the one-time questionnaire: only what's missing. Declarations as tap buttons,
+ * address and years per skill as replies. Returns how many questions were sent.
+ */
+export async function sendQuestionnaire(userId, profile) {
+  const chatId = profile?.telegram?.chatId;
+  if (!chatId) return { ok: false, error: 'telegram not connected' };
+  const miss = missingItems(profile);
+  const total = miss.declarations.length + (miss.address ? 1 : 0) + (miss.skillYears ? 1 : 0);
+  if (!total) return { ok: true, sent: 0 };
+  await send(chatId, `📝 <b>${total} quick question${total === 1 ? '' : 's'}, asked once</b>\nEmployers keep asking these, and each one pauses an application until you answer. Answer here once and I'll reuse it for every application. Tap <b>Ask me each time</b> for anything you'd rather decide per job.`);
+  let sent = 0;
+  for (const i of miss.declarations) {
+    const r = await send(chatId, h(DECLARATIONS[i].ask), { buttons: [[
+      { text: 'Yes', callback_data: `dq:${i}:y` }, { text: 'No', callback_data: `dq:${i}:n` }, { text: 'Ask me each time', callback_data: `dq:${i}:a` },
+    ]] });
+    if (r.ok) sent++;
+  }
+  let pending = [...(profile.telegram.pending || [])];
+  if (miss.address) {
+    const r = await send(chatId, '🏠 <b>Your home address</b> (some forms, like Workday, require it)\nReply to this message, e.g.:\n<i>Flat 4B, 12 MG Road, Indiranagar, Bengaluru, Karnataka 560038</i>', { forceReply: true });
+    if (r.ok) { sent++; pending.push({ id: r.result.message_id, q: 'Home address', field: 'address', at: Date.now() }); }
+  }
+  if (miss.skillYears) {
+    const skills = skillsToAsk(profile);
+    const r = await send(chatId, `🧮 <b>Years of experience per skill</b> (forms ask "How many years of X?")\nReply with your own numbers, e.g.:\n<i>${h(skills.slice(0, 3).map((s, k) => `${s} ${[3, 4, 2][k]}`).join(', '))}</i>\n\nYour skills: ${h(skills.join(', '))}. Add any others you want, like SQL.`, { forceReply: true });
+    if (r.ok) { sent++; pending.push({ id: r.result.message_id, q: 'Years per skill', field: 'skillYears', at: Date.now() }); }
+  }
+  pending = pending.slice(-20);
+  await save(userId, { ...profile, telegram: { ...profile.telegram, pending } });
+  return { ok: true, sent };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Inbound                                                            */
 /* ------------------------------------------------------------------ */
@@ -227,6 +262,20 @@ async function onMessage(msg) {
   // A reply to one of the agent's questions: save it to the answer bank.
   const replyTo = msg.reply_to_message?.message_id;
   const pending = (p.telegram.pending || []).find((x) => x.id === replyTo);
+  // Questionnaire replies (address, years per skill) go to their own fields.
+  if (pending?.field && text) {
+    const answers = { ...(p.answers || {}) };
+    let saved;
+    if (pending.field === 'address') { answers.address = parseAddress(text); saved = answers.address.full; }
+    if (pending.field === 'skillYears') {
+      answers.skillYears = { ...(answers.skillYears || {}), ...parseSkillYears(text) };
+      saved = Object.entries(answers.skillYears).map(([k, v]) => `${k} ${v}`).join(', ');
+    }
+    await save(owner.userId, { ...p, answers, telegram: { ...p.telegram, pending: p.telegram.pending.filter((x) => x.id !== replyTo) } });
+    await requeueNeedsUser(owner.userId);
+    await send(chatId, saved ? `Saved ✓ <b>${h(saved)}</b>. I'll use it on every application that asks.` : 'I couldn\'t read that. Please reply again in the format shown.');
+    return;
+  }
   if (pending && text) {
     const answers = { ...(p.answers || {}) };
     const custom = (answers.custom || []).filter((c) => c.q !== pending.q);
@@ -272,6 +321,23 @@ async function onCallback(cb) {
     await requeueNeedsUser(owner.userId);
     await tg('editMessageText', { chat_id: chatId, message_id: cb.message.message_id, parse_mode: 'HTML',
       text: `✅ <b>${h(pend.q)}</b>\n${h(choice)}\n<i>Saved. I'll use this from now on.</i>` });
+    return answer('Saved');
+  }
+
+  // Questionnaire buttons: dq:<declaration index>:<y|n|a> → a standing answer.
+  if (kind === 'dq') {
+    const owner = await profileByChat(chatId);
+    if (!owner || cb.from?.id !== chatId) return answer('This button belongs to another account.');
+    const [, idx, choice] = String(cb.data).split(':');
+    const decl = DECLARATIONS[Number(idx)];
+    const value = { y: 'yes', n: 'no', a: 'ask' }[choice];
+    if (!decl || !value) return answer('Unknown answer.');
+    const p = owner.data;
+    const answers = { ...(p.answers || {}), declarations: { ...(p.answers?.declarations || {}), [decl.key]: value } };
+    await save(owner.userId, { ...p, answers });
+    await requeueNeedsUser(owner.userId);
+    await tg('editMessageText', { chat_id: chatId, message_id: cb.message.message_id, parse_mode: 'HTML',
+      text: `✅ ${h(decl.ask)}\n<b>${value === 'ask' ? 'Ask me each time' : value === 'yes' ? 'Yes' : 'No'}</b>` });
     return answer('Saved');
   }
 

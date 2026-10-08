@@ -8,6 +8,28 @@
 // want to work here?") come back as essay, for the AI writer to draft.
 import { COUNTRY_NAMES, ALL_CC, userScope, resolveChoice } from './geo.js';
 
+/**
+ * Standing yes/no answers the user gives once (Telegram questionnaire or Application
+ * Answers page) and the agent reuses for every employer's wording. `legal`: never
+ * assumed, only her own answer. Order matters: the first match wins.
+ */
+export const DECLARATIONS = [
+  { key: 'nonCompete', legal: true, ask: 'Are you bound by a non-compete, non-solicitation or any agreement that could restrict where you work next?',
+    re: /non-?compete|non-?solicit|restrictive covenant|post-employment restriction|agreements? (that )?(may )?restrict|subject to any (employment )?agreement/ },
+  { key: 'outsideBusiness', legal: true, ask: 'Do you have outside business activities (advisory, consulting, board roles or a side business) that you would continue?',
+    re: /outside business|side business|outside (employment|activit)/ },
+  { key: 'exportControl', legal: true, ask: 'Do US export-control rules (the "deemed export" rule) affect your employment?',
+    re: /deemed export|export control/ },
+  { key: 'government', legal: true, ask: 'Are you (or were you) a government official, or involved in government procurement or contract awards?',
+    re: /government official|public official|politically exposed|procurement|contract award/ },
+  { key: 'conflict', legal: true, ask: 'Do you have any conflict of interest with employers you apply to?', re: /conflict of interest/ },
+  { key: 'criminal', legal: true, ask: 'Have you ever been convicted of a criminal offence?', re: /criminal|convicted|background (issue|record)/ },
+  { key: 'clearance', legal: true, ask: 'Do you hold a government security clearance?', re: /security clearance/ },
+  { key: 'shifts', ask: 'Are you willing to work night shifts or US/UK shift timings?', re: /night shift|\b(us|uk|rotational|evening|night) shifts?\b|work in shifts/ },
+  { key: 'travel', ask: 'Are you willing to travel for work when needed?', re: /willing(ness)? to travel|travel (up to|required|requirement)|comfortable (with )?travel/ },
+];
+const SANCTIONED = /\b(cuba|iran|north korea|syria|crimea|donetsk|luhansk|sevastopol)\b/;
+
 export const AUTH_STATUS = {
   citizen: 'Citizen',
   permanent: 'Permanent resident',
@@ -88,6 +110,8 @@ export function answerBankStatus(profile) {
 /* ------------------------------------------------------------------ */
 
 const lc = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Company name without legal suffixes, for "same employer?" checks ("Evergreen enterprises pvt ltd" → "evergreen").
+const normCo = (s) => lc(s).replace(/\b(private|pvt|limited|ltd|inc|llc|corp|corporation|co|company|enterprises?|technologies|technology|solutions|services|group|india)\b\.?/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
 
 /** Which of our 8 countries a question is about, if it names one. */
 function countryIn(q) {
@@ -303,9 +327,19 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/linkedin/.test(t)) return text(String(a.linkedin || '').replace(/[?#].*$/, ''), 'linkedin', 'LinkedIn URL'); // no tracking tail (?isSelf…)
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
 
-  // ---- legal restrictions: always the user's call ----
-  if (/non-?compete|non-?solicit|restrictive covenant|post-employment restriction|agreements? (that )?(may )?restrict|subject to any (employment )?agreement|outside business|conflict of interest|deemed export|export control|government official|procurement|security clearance|criminal|convicted|background (issue|record)/.test(t)) {
-    return { needsHuman: true, reason: 'legal question: only you can answer this' };
+  // ---- sanctions checks ("located in / citizen of Cuba, Iran, North Korea…?"): from her nationality and city ----
+  if (SANCTIONED.test(t) && /locat|citizen|residen|nationalit|based/.test(t)) {
+    if (!a.nationality) return { needsHuman: true, reason: 'nationality not set' };
+    const home = COUNTRY_NAMES[(resolveChoice(profile.baseCity) || {}).cc] || '';
+    return yesno(SANCTIONED.test(lc(`${a.nationality} ${home}`)), 'your nationality and city');
+  }
+
+  // ---- standing declarations (legal, shifts, travel): her own once-given answer, or ask ----
+  const decl = DECLARATIONS.find((x) => x.re.test(t));
+  if (decl) {
+    const v = (a.declarations || {})[decl.key];
+    if (v === 'yes' || v === 'no') return yesno(v === 'yes', 'your standing answer');
+    return { needsHuman: true, reason: decl.legal ? 'legal question: only you can answer this' : decl.ask };
   }
 
   // ---- work authorization ----
@@ -354,7 +388,15 @@ export function answerQuestion(q, profile, ctx = {}) {
   const home = resolveChoice(profile.baseCity) || {};
   const homeCountry = home.cc ? COUNTRY_NAMES[home.cc] : '';
   const city = profile.baseCity ? String(profile.baseCity).replace(/\b\w/g, (c) => c.toUpperCase()) : '';
-  if (/home address|street address|postal address|\bzip\b|pin ?code|postcode/.test(t)) return { needsHuman: true, reason: 'full address' };
+  // Address: from the one she gave in the questionnaire (address.full / line1 / state / pin).
+  const ad = a.address || {};
+  if (/\bzip\b|pin ?code|postcode|postal code/.test(t)) return ad.pin ? text(ad.pin, 'your address') : { needsHuman: true, reason: 'full address' };
+  if (/^(state|province|state ?\/ ?province|state or province|state\/region)$/.test(t.trim())) return ad.state ? text(ad.state, 'your address') : { needsHuman: true, reason: 'full address' };
+  if (/address line ?1|^street|street address/.test(t)) return ad.line1 ? text(ad.line1, 'your address') : { needsHuman: true, reason: 'full address' };
+  if (/home address|postal address|residential address|current address|permanent address|^address\b/.test(t)) return ad.full ? text(ad.full, 'your address') : { needsHuman: true, reason: 'full address' };
+  if (/(permanent|current|your) .{0,30}work location|where (is|will be) your .{0,20}work location/.test(t)) {
+    return text(city && homeCountry ? `${city}, ${homeCountry}` : '', 'your city', 'base city');
+  }
   if (/country of residence|country (do )?you (currently )?(live|reside)|current country|^country\b|country (in which|where) you (are|currently) (located|based|reside)|choose the country/.test(t)) return text(homeCountry, 'your city', 'base city');
   // A bare "City" field (address forms such as Workday's): just the city.
   if (/^(town ?\/ ?)?city( ?\/ ?town)?$/.test(t.trim())) return text(city, 'your city', 'base city');
@@ -444,6 +486,13 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/total (years of )?(professional |work )?experience|years of (professional |work )?experience\??$|how many years.{0,20}(work|professional) experience|how many years of experience (do )?you have\??$|^(professional|work) experience$/.test(t) && !/relevant/.test(t)) {
     return profile.totalExpYears == null ? { needsHuman: true, reason: 'years of experience not set' } : text(String(profile.totalExpYears), 'years of experience');
   }
+  // Years with a specific skill ("How many years of SQL experience?"): her own numbers from the questionnaire.
+  if (/years?|how long/.test(t) && /experience|worked|using/.test(t)) {
+    const sy = a.skillYears || {};
+    const skill = Object.keys(sy).sort((x, y) => y.length - x.length)
+      .find((s) => new RegExp(`(^|[^a-z0-9])${s.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`).test(t));
+    if (skill) return text(String(sy[skill]), `your years with ${skill}`);
+  }
   if (/years.{0,30}experience (with|in|using)|experience (with|in) .{2,40}\?/.test(t)) return { needsHuman: true, reason: 'skill-specific experience (answer once, reused after)' };
   if (/^(school|university|college|institution|institute)( name)?$|name of (your )?(school|university|college|institution)|which (school|university|college)/.test(t)) {
     return text(a.school, 'school / university', 'school or university');
@@ -452,7 +501,23 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/field of study|major|discipline|specialization/.test(t)) return text(a.fieldOfStudy, 'field of study', 'field of study');
   if (/graduat.{0,20}year|year of (graduation|passing)/.test(t)) return text(a.graduationYear, 'graduation year', 'graduation year');
   if (/driv(ing|er'?s) licen[cs]e/.test(t)) return a.drivingLicense === '' ? { needsHuman: true, reason: 'driving licence not set' } : yesno(a.drivingLicense === 'yes', 'driving licence');
+  // "In addition to English, any other languages you speak fluently?": her languages other than English.
+  if (/(in addition to|other than|besides) english|other languages?/.test(t) && /speak|fluen|proficien/.test(t)) {
+    if (!a.languages) return { needsHuman: true, reason: 'languages not set' };
+    const others = String(a.languages).split(/[,;/]+/).map((s) => s.trim()).filter((s) => s && !/^english$/i.test(s));
+    if (isChoice && opts.some((o) => YES.test(lc(o)))) return yesno(others.length > 0, 'your languages');
+    return { answer: others.length ? others.map((s) => s[0].toUpperCase() + s.slice(1)).join(', ') : 'None', source: 'your languages' };
+  }
   if (/languages? (do you speak|spoken|known)|which languages/.test(t)) return text(a.languages, 'languages', 'languages');
+  // "Are you currently working at <company>?": compared with her current employer.
+  if (/currently (working|employed) (at|for|with)|current employee of/.test(t) && ctx.company && a.currentEmployer) {
+    const same = normCo(a.currentEmployer) && normCo(ctx.company) && (normCo(a.currentEmployer).includes(normCo(ctx.company)) || normCo(ctx.company).includes(normCo(a.currentEmployer)));
+    if (!same) return yesno(false, 'your current employer');
+  }
+  if (/how (should|can|do) we (communicate|contact)|preferred (method of )?(communication|contact)/.test(t)) {
+    const o = isChoice ? opts.find((x) => /e-?mail/i.test(x)) : 'Email';
+    if (o) return { answer: o, source: 'default: email' };
+  }
   if (/(18|eighteen) years|legal age|age of majority/.test(t)) return yesno(true, 'adult');
   if (/how did you (hear|find|learn|get to know|come to know|come across)|source of (application|referral)|where did you (hear|see|find)/.test(t)) {
     if (!isChoice) return { answer: 'Company careers website', source: 'default' };
