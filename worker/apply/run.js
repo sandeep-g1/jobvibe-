@@ -33,7 +33,7 @@ export function blocksEligibility(f, r) {
   if (f.type === 'checkbox' && (f.options?.length || 0) <= 1) return r.answer === false && f.required;
   return isNo(r.answer);
 }
-const CLOSED = /job (you requested )?(was )?not found|(job|position|posting|role) (is )?no longer (available|open|active|accepting)|no longer accepting applications|(job|position|posting) has (been )?(closed|filled|expired)|this (job|position) (is )?closed|page (you('re| are) looking for )?(could not be|was not|wasn't) found/i;
+const CLOSED = /no longer (open|available|accepting)|job (you requested )?(was )?not found|(job|position|posting|role) (is )?no longer (available|open|active|accepting)|no longer accepting applications|(job|position|posting) has (been )?(closed|filled|expired)|this (job|position) (is )?closed|page (you('re| are) looking for )?(could not be|was not|wasn't) found/i;
 // Two field values that say the same thing: equal text, the same URL (http/https, www,
 // trailing slash), or the same city ("Bengaluru, Karnataka, IND" = "Bengaluru, India").
 // A site's own location pick is kept: retyping it as free text can clear an autocomplete.
@@ -142,7 +142,11 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
   let clicked = false;
   try {
     const fields = await openForm(page, url);
-    if (!fields.length) {
+    // A closed job often lands on the company's job list ("The job you are looking for is
+    // no longer open"), whose search box is not an application form. A real form asks for
+    // a CV or an email.
+    const isForm = fields.some((f) => f.type === 'file' || /e-?mail/i.test(f.label));
+    if (!fields.length || !isForm) {
       const text = await page.evaluate(() => document.body.innerText).catch(() => '');
       if (CLOSED.test(text)) return { status: 'closed', reason: 'the employer has closed this job', url };
       return { status: 'failed', reason: 'no application form found on the page', url };
