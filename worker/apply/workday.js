@@ -76,7 +76,10 @@ const pageSays = (page) => page.evaluate(() => {
 
 const bodyText = (page) => page.evaluate(() => document.body.innerText).catch(() => '');
 const visibleErrors = (page) => page.evaluate((sel) => [...document.querySelectorAll(sel)]
-  .filter((e) => e.getClientRects().length).map((e) => e.innerText.trim()).filter(Boolean), ERRORS).catch(() => []);
+  .filter((e) => e.getClientRects().length).map((e) => e.innerText.trim()).filter(Boolean), ERRORS)
+  // Workday uses the same alert boxes for good news ("…successfully uploaded"): those are not errors.
+  .then((list) => list.filter((t) => !/success|uploaded|saved|has been (sent|updated)|complete(d)?\b/i.test(t)))
+  .catch(() => []);
 
 /* ---------------- sign in / create account ---------------- */
 
@@ -186,9 +189,15 @@ async function enter(page, { account, profile, createAccount, getVerifyLink, get
   const box = page.locator(ID('createAccountCheckbox')).first();
   if (await box.count() && !(await box.isChecked().catch(() => false))) await box.check({ force: true });
   const since = new Date();
+  // What the site answers to "Create Account" (status codes only), so a silent refusal
+  // (e.g. a bot check dropping the request) shows up as such instead of as a mystery.
+  const net = [];
+  const onResp = (r) => { const t = r.request().resourceType(); if (t === 'xhr' || t === 'fetch') net.push(`${r.status()} ${r.request().method()} ${new URL(r.url()).pathname.slice(0, 50)}`); };
+  page.on('response', onResp);
   await press(page, 'createAccountSubmitButton');
   await settle(page);
   await page.waitForTimeout(2500);
+  page.off('response', onResp);
 
   const errs = await visibleErrors(page);
   // Workday's message can sit outside any error box: read the form's own text too
@@ -202,9 +211,19 @@ async function enter(page, { account, profile, createAccount, getVerifyLink, get
       screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   }
   if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check when creating the account' };
-  // Still on the create-account form: Workday did not accept it. Nothing is stored.
+  // Still on the create-account form with no error. Some sites (Accenture: "An email … will
+  // arrive shortly. Click on the link and create the account") finish the account by email:
+  // wait for that link before deciding. Nothing is stored unless it arrives.
   if (await page.locator(`${ID('verifyPassword')}:visible`).count()) {
-    return { status: 'failed', reason: `Workday did not create the account: "${message}"`, noRetry: true,
+    const link = !errs.length && getVerifyLink ? await getVerifyLink(since) : null;
+    if (link) {
+      await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(3000);
+      await createAccount({ ...acc, verified: true });
+      return { restart: acc };
+    }
+    const answered = net.length ? `site answered: ${net.slice(-5).join(', ')}` : 'the site sent no answer at all';
+    return { status: 'failed', reason: `Workday did not create the account (${answered}; no email arrived): "${message.slice(0, 160)}"`, noRetry: true,
       screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   }
   await createAccount(acc); // accepted: the account exists from here on

@@ -11,8 +11,9 @@
 // supported form? → tailor the CV → fill → submit → Telegram receipt. Anything
 // it can't do alone goes back to the user on Telegram.
 import { createRequire } from 'node:module';
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, readFileSync, unlinkSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
@@ -43,6 +44,7 @@ const HEADED = argv.includes('--headed');
 const SUPPORTED = new Set(['greenhouse', 'lever', 'ashby', 'recruitee', 'workday']);
 const DEFAULT_DAILY_CAP = 10;
 const LOCK = join(tmpdir(), 'jobvibe-worker.lock');
+const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const log = (m) => console.log(`${new Date().toISOString().slice(11, 19)} ${m}`);
 const safe = (s) => String(s || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
 
@@ -329,12 +331,31 @@ async function main() {
   const browser = await chromium.launch({ headless: !HEADED });
   log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}`);
   if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
+  const codeAtStart = codeStamp();
   for (;;) {
     try { await inboxTick(); } catch (err) { log(`inbox tick failed: ${err.message}`); }
     try { await tick(browser); } catch (err) { log(`tick failed: ${err.message}`); }
+    // Code changed on disk (a fix was made): stop between jobs, so worker/always-on.ps1
+    // starts the new version. Running Node never picks up edits by itself.
+    if (codeStamp() > codeAtStart) { log('code updated: restarting with the new version'); await browser.close().catch(() => {}); process.exit(0); }
     // 60-120 s between applications so employers aren't hit in bursts.
     await new Promise((r) => setTimeout(r, 60000 + Math.floor(Math.random() * 60000)));
   }
+}
+
+/** Newest modification time of the worker's and app's source files. */
+function codeStamp() {
+  let newest = 0;
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.js')) newest = Math.max(newest, statSync(p).mtimeMs);
+    }
+  };
+  for (const d of ['worker', 'src']) { try { walk(join(ROOT_DIR, d)); } catch { /* missing */ } }
+  return newest;
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
