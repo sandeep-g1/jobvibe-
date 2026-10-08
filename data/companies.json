@@ -1300,6 +1300,74 @@
     {
       "name": "Toptal",
       "slug": "toptal"
+    },
+    {
+      "name": "Capco",
+      "slug": "capco"
+    },
+    {
+      "name": "Coupang",
+      "slug": "coupang"
+    },
+    {
+      "name": "Brex",
+      "slug": "brex"
+    },
+    {
+      "name": "DevRev",
+      "slug": "devrev"
+    },
+    {
+      "name": "6sense",
+      "slug": "6sense"
+    },
+    {
+      "name": "PhData",
+      "slug": "phdata"
+    },
+    {
+      "name": "Zinnia",
+      "slug": "zinnia"
+    },
+    {
+      "name": "YipitData",
+      "slug": "yipitdata"
+    },
+    {
+      "name": "Precision AQ",
+      "slug": "precisionaq"
+    },
+    {
+      "name": "Observe.AI",
+      "slug": "observeai"
+    },
+    {
+      "name": "Turing",
+      "slug": "turing"
+    },
+    {
+      "name": "Anthropic",
+      "slug": "anthropic"
+    },
+    {
+      "name": "Phizenix",
+      "slug": "phizenix"
+    },
+    {
+      "name": "Recorded Future",
+      "slug": "recordedfuture"
+    },
+    {
+      "name": "Carrot",
+      "slug": "carrotfertility"
+    },
+    {
+      "name": "Lighthouse",
+      "slug": "lighthouse"
+    },
+    {
+      "name": "Scale AI",
+      "slug": "scaleai"
     }
   ],
   "lever": [
@@ -1782,6 +1850,62 @@
     {
       "name": "Hasura",
       "slug": "hasura"
+    },
+    {
+      "name": "Paytm",
+      "slug": "paytm"
+    },
+    {
+      "name": "Mactores",
+      "slug": "mactores"
+    },
+    {
+      "name": "Drivetrain",
+      "slug": "drivetrain"
+    },
+    {
+      "name": "Zeta",
+      "slug": "zeta"
+    },
+    {
+      "name": "Level AI",
+      "slug": "levelai"
+    },
+    {
+      "name": "Safe Security",
+      "slug": "safe"
+    },
+    {
+      "name": "Sophos",
+      "slug": "sophos"
+    },
+    {
+      "name": "Nium",
+      "slug": "nium"
+    },
+    {
+      "name": "Spreetail",
+      "slug": "spreetail"
+    },
+    {
+      "name": "Portcast",
+      "slug": "portcast"
+    },
+    {
+      "name": "PopSockets",
+      "slug": "popsockets"
+    },
+    {
+      "name": "Pocket FM",
+      "slug": "pocketfm"
+    },
+    {
+      "name": "Workloom",
+      "slug": "epifi"
+    },
+    {
+      "name": "DISQO",
+      "slug": "disqo"
     }
   ],
   "ashby": [
@@ -2160,6 +2284,70 @@
     {
       "name": "AITable",
       "slug": "aitable"
+    },
+    {
+      "name": "Tekion",
+      "slug": "tekion"
+    },
+    {
+      "name": "Bureau",
+      "slug": "bureau"
+    },
+    {
+      "name": "Level AI",
+      "slug": "level-ai"
+    },
+    {
+      "name": "Snowflake",
+      "slug": "snowflake"
+    },
+    {
+      "name": "ClickHouse",
+      "slug": "clickhouse"
+    },
+    {
+      "name": "Airwallex",
+      "slug": "airwallex"
+    },
+    {
+      "name": "Atlan",
+      "slug": "atlan"
+    },
+    {
+      "name": "Sanctuary",
+      "slug": "sanctuary"
+    },
+    {
+      "name": "Gainsight",
+      "slug": "gainsight"
+    },
+    {
+      "name": "Skyflow",
+      "slug": "skyflow"
+    },
+    {
+      "name": "Redis",
+      "slug": "redis"
+    },
+    {
+      "name": "Temporal",
+      "slug": "temporal"
+    },
+    {
+      "name": "Passage",
+      "slug": "passage"
+    },
+    {
+      "name": "Amplitude",
+      "slug": "amplitude"
+    },
+    {
+      "name": "Terac",
+      "slug": "terac"
+    },
+    {
+      "name": "Confluent",
+      "slug": "confluent"
     }
   ],
   "smartrecruiters": [
