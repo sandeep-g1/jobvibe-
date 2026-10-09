@@ -343,6 +343,24 @@ const TABLES = (pk, json) => `
     UNIQUE(user_id, uid)
   );
 
+  -- Follow-ups the agent writes when a recruiter thread goes quiet (worker/followups.js).
+  -- status: drafted | approved | sent | dismissed | failed
+  CREATE TABLE IF NOT EXISTS followups (
+    id            ${pk},
+    user_id       TEXT NOT NULL,
+    event_id      INTEGER NOT NULL,
+    queue_id      INTEGER,
+    to_addr       TEXT NOT NULL,
+    subject       TEXT,
+    in_reply_to   TEXT,
+    body          TEXT NOT NULL,
+    n             INTEGER NOT NULL,
+    auto          INTEGER,
+    status        TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    sent_at       TEXT
+  );
+
   -- Metered job APIs (JSearch…): calls this month, pauses after quota/refusal
   -- errors, and when each term was last searched (src/lib/quota.js).
   CREATE TABLE IF NOT EXISTS api_usage (
@@ -395,6 +413,12 @@ const MIGRATIONS = [
   'ALTER TABLE job_matches ADD COLUMN ats_after INTEGER',
   'ALTER TABLE job_matches ADD COLUMN tailor_added TEXT',
   'ALTER TABLE job_matches ADD COLUMN tailored_cv_b64 TEXT',
+  // Recruiter replies: what the email asked for, whether the reply went out on its own,
+  // whether the CV goes with it, and when it was sent.
+  'ALTER TABLE inbox_events ADD COLUMN asks TEXT',
+  'ALTER TABLE inbox_events ADD COLUMN auto_reply INTEGER',
+  'ALTER TABLE inbox_events ADD COLUMN attach_cv INTEGER',
+  'ALTER TABLE inbox_events ADD COLUMN sent_at TEXT',
 ];
 
 /* ------------------------------------------------------------------ */

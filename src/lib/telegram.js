@@ -12,7 +12,7 @@
 // only works from the chat linked to the match's owner.
 import { createHash, randomBytes } from 'node:crypto';
 import { cleanEnv } from '../db/driver.js';
-import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus, overrideIneligible } from '../db.js';
+import { allProfiles, saveProfileRow, setDecision, matchWithJob, requeueNeedsUser, inboxEvent, setReplyStatus, overrideIneligible, followup, setFollowupStatus } from '../db.js';
 import { DECLARATIONS } from './answers.js';
 import { parseAddress, parseSkillYears, missingItems, skillsToAsk } from './questionnaire.js';
 
@@ -368,6 +368,18 @@ async function onCallback(cb) {
     await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
     await send(chatId, kind === 'rs' ? `✉️ Sending your reply to ${h(ev.from_addr)} in the next minute.` : '✋ Okay, you\'ll reply yourself.');
     return answer(kind === 'rs' ? 'Queued to send' : 'Noted');
+  }
+
+  // Follow-up buttons: fs = send the follow-up, fd = skip it.
+  if (kind === 'fs' || kind === 'fd') {
+    const f = Number.isInteger(id) ? await followup(id) : null;
+    if (!f) return answer('That follow-up is no longer available.');
+    const owner = (await allProfiles()).find((p) => p.userId === f.user_id);
+    if (!owner || owner.data?.telegram?.chatId !== chatId || cb.from?.id !== chatId) return answer('This button belongs to another account.');
+    if (!(await setFollowupStatus(f.id, f.user_id, kind === 'fs' ? 'approved' : 'dismissed'))) return answer('Already handled.');
+    await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+    await send(chatId, kind === 'fs' ? `📨 Sending the follow-up to ${h(f.to_addr)} in the next minute.` : '✋ Okay, no follow-up.');
+    return answer(kind === 'fs' ? 'Queued to send' : 'Noted');
   }
 
   const m = Number.isInteger(id) ? await matchWithJob(id) : null;

@@ -12,9 +12,22 @@ const STATUS = {
 };
 const EMAIL = { interview: '📅 Interview', assessment: '📝 Assessment', offer: '🎉 Offer', info_request: '📎 Info requested', rejection: 'Not selected', received: 'Received' };
 
+const OUT = {
+  reply: (e) => `↩ Reply sent${e.auto ? ' (automatic)' : ''}`, reply_waiting: () => '↩ Reply drafted, waiting for your OK in Telegram',
+  reply_queued: () => '↩ Reply going out', followup: (e) => `⏰ Follow-up ${e.n} sent${e.auto ? ' (automatic)' : ''}`,
+  followup_waiting: (e) => `⏰ Follow-up ${e.n} drafted, waiting for your OK`,
+};
+const IN = { ...EMAIL, other: '✉️ Recruiter wrote' };
+const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
+/** One line per email in or out: "8 Oct · 📅 Interview: Re: your application". */
+const threadLine = (e) => `<div class="mail ${e.dir}">${esc(day(e.at))} · ${esc(e.dir === 'in' ? `${IN[e.kind] || 'Email'}: ${e.text || ''}` : OUT[e.kind](e))}</div>`;
+
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
-export function applicationsPage(rows) {
+export function applicationsPage(rows, timeline = []) {
+  const byApp = new Map();
+  for (const e of timeline) if (e.queue_id != null) byApp.set(Number(e.queue_id), [...(byApp.get(Number(e.queue_id)) || []), e]);
+  const loose = timeline.filter((e) => e.queue_id == null);
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
   const chips = Object.entries(counts).sort((a, b) => b[1] - a[1])
@@ -32,9 +45,10 @@ export function applicationsPage(rows) {
       : route?.route === 'manual'
         ? `<span class="tag muted">✋ You apply</span><div class="sub">${esc(route.reason || '')}</div>`
         : '<span class="sub">—</span>';
-    const note = [det.lastEmail ? EMAIL[det.lastEmail] : '', r.reason && !['submitted'].includes(r.status) ? r.reason : '',
+    const thread = byApp.get(Number(r.id)) || [];
+    const note = [thread.length ? '' : det.lastEmail ? EMAIL[det.lastEmail] : '', r.reason && !['submitted'].includes(r.status) ? r.reason : '',
       r.status === 'submitted' && det.evidence?.text ? `Site said: “${det.evidence.text}”` : '']
-      .filter(Boolean).map(esc).join('<br>');
+      .filter(Boolean).map(esc).join('<br>') + thread.map(threadLine).join('');
     return `<tr>
       <td><a href="${esc(r.final_url || r.apply_url)}" target="_blank" rel="noopener"><b>${esc(r.title)}</b></a><div class="sub">${esc(r.company)}</div></td>
       <td>${esc(place) || '—'}</td>
@@ -63,6 +77,8 @@ export function applicationsPage(rows) {
       <tbody>${body}</tbody>
     </table>
   </div>
+  ${loose.length ? `<div class="card" style="margin-top:16px"><h3 style="margin:0 0 8px">Recruiter emails not tied to an application</h3>${loose.map((e) =>
+    `${e.dir === 'in' ? `<div class="sub" style="margin-top:8px"><b>${esc(e.company || '')}</b></div>` : ''}${threadLine(e)}`).join('')}</div>` : ''}
   <p class="muted" style="margin-top:12px">⚡ Auto-apply: the agent fills and submits the employer's own form with your tailored CV.
     ✋ You apply: the site blocks automated applications or needs your account; the tailored CV is still prepared for you.</p>
 </div>
@@ -75,6 +91,7 @@ export function applicationsPage(rows) {
   .tag { display:inline-block; padding:3px 9px; border-radius:10px; font-size:.74rem; font-weight:700; white-space:nowrap; }
   .tag.ok { background:#dcfce7; color:#15803d; } .tag.warn { background:#fef3c7; color:#92400e; } .tag.bad { background:#fee2e2; color:#b91c1c; }
   .tag.info { background:#eef4fc; color:#0a66c2; } .tag.muted { background:#f2f4f8; color:#667085; }
+  .mail { font-size:.74rem; margin-top:4px; color:#475467; } .mail.out { color:#15803d; }
   .dl { font-size:.78rem; font-weight:600; white-space:nowrap; }
 </style>`,
   });

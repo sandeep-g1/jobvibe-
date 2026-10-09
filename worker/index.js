@@ -33,6 +33,7 @@ import { applyWorkday, siteKey } from './apply/workday.js';
 import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
+import { planFollowups, sendFollowups } from './followups.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -325,11 +326,14 @@ const lastInbox = new Map();
 async function inboxTick() {
   const sent = await sendApprovedReplies();
   if (sent) log(`sent ${sent} approved repl${sent === 1 ? 'y' : 'ies'}`);
+  const fus = await sendFollowups();
+  if (fus) log(`sent ${fus} follow-up(s)`);
   for (const p of await allProfiles()) {
     if (!p.data?.mailbox?.passEnc) continue;
     if (!ONCE && Date.now() - (lastInbox.get(p.userId) || 0) < INBOX_EVERY_MS) continue;
     lastInbox.set(p.userId, Date.now());
     try { log(`${p.userId}: inbox ${await checkInbox(p.userId)}`); } catch (err) { log(`${p.userId}: inbox failed ${err.message}`); }
+    try { const n = await planFollowups(p.userId); if (n) log(`${p.userId}: ${n} follow-up(s) drafted`); } catch (err) { log(`${p.userId}: follow-ups failed ${err.message}`); }
   }
 }
 

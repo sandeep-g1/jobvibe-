@@ -541,10 +541,10 @@ export async function insertInboxEvent(e) {
   if (exists) return null;
   return num(await d.insertReturningId(
     `INSERT INTO inbox_events (user_id, uid, queue_id, company, from_addr, subject, category, summary, draft_reply,
-       reply_status, message_id, received_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       reply_status, message_id, received_at, created_at, asks, attach_cv) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [e.user_id, String(e.uid), e.queue_id ?? null, e.company ?? null, e.from_addr ?? null, e.subject ?? null, e.category,
      e.summary ?? null, e.draft_reply ?? null, e.draft_reply ? 'drafted' : 'none', e.message_id ?? null,
-     e.received_at ?? null, now()]));
+     e.received_at ?? null, now(), JSON.stringify(e.asks || []), e.attach_cv ? 1 : 0]));
 }
 
 export async function inboxEvent(id) {
@@ -557,8 +557,105 @@ export async function setReplyStatus(id, userId, status) {
   const d = await db();
   const row = await d.one('SELECT id FROM inbox_events WHERE id = ? AND user_id = ?', [id, userId]);
   if (!row) return false;
-  await d.run('UPDATE inbox_events SET reply_status = ? WHERE id = ?', [status, id]);
+  await d.run(`UPDATE inbox_events SET reply_status = ?${status === 'sent' ? ', sent_at = ?' : ''} WHERE id = ?`,
+    status === 'sent' ? [status, now(), id] : [status, id]);
   return true;
+}
+
+/** Mark a reply as going out on its own (policy allowed it): approved + auto. */
+export async function approveAutoReply(id) {
+  const d = await db();
+  await d.run(`UPDATE inbox_events SET reply_status = 'approved', auto_reply = 1 WHERE id = ? AND reply_status = 'drafted'`, [id]);
+}
+
+/* ---------------- follow-ups ---------------- */
+
+/**
+ * Recruiter threads that went quiet: she replied (sent_at), and no email from that sender
+ * since, for at least `days` days. With how many follow-ups each already has.
+ */
+export async function quietThreads(userId, days) {
+  const d = await db();
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const rows = await d.query(
+    `SELECT e.*, j.title AS job_title FROM inbox_events e
+       LEFT JOIN apply_queue q ON q.id = e.queue_id LEFT JOIN job_matches m ON m.id = q.match_id LEFT JOIN jobs j ON j.id = m.job_id
+      WHERE e.user_id = ? AND e.reply_status = 'sent' AND e.sent_at IS NOT NULL
+        AND e.category IN ('interview', 'info_request', 'assessment', 'other')`, [userId]);
+  const out = [];
+  for (const e of rows) {
+    const lastOut = (await d.one(`SELECT MAX(sent_at) AS t, COUNT(*) AS n FROM followups WHERE event_id = ? AND status = 'sent'`, [e.id])) || {};
+    const since = lastOut.t && lastOut.t > e.sent_at ? lastOut.t : e.sent_at;
+    if (since > cutoff) continue; // not quiet long enough
+    const newer = await d.one(`SELECT id FROM inbox_events WHERE user_id = ? AND LOWER(from_addr) = LOWER(?) AND created_at > ? LIMIT 1`, [userId, e.from_addr, e.sent_at]);
+    if (newer) continue; // they wrote back
+    const pending = await d.one(`SELECT id FROM followups WHERE event_id = ? AND status IN ('drafted', 'approved') LIMIT 1`, [e.id]);
+    if (pending) continue;
+    out.push({ ...e, followupsSent: Number(lastOut.n) || 0 });
+  }
+  return out;
+}
+
+export async function insertFollowup(f) {
+  const d = await db();
+  return num(await d.insertReturningId(
+    `INSERT INTO followups (user_id, event_id, queue_id, to_addr, subject, in_reply_to, body, n, auto, status, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [f.user_id, f.event_id, f.queue_id ?? null, f.to_addr, f.subject ?? null, f.in_reply_to ?? null, f.body, f.n, f.auto ? 1 : 0, f.status, now()]));
+}
+
+export async function followup(id) {
+  const d = await db();
+  return d.one('SELECT * FROM followups WHERE id = ?', [id]);
+}
+
+/** Owner-scoped follow-up decision from Telegram ('approved' / 'dismissed'), only while drafted. */
+export async function setFollowupStatus(id, userId, status) {
+  const d = await db();
+  const row = await d.one(`SELECT id, status FROM followups WHERE id = ? AND user_id = ?`, [id, userId]);
+  if (!row) return false;
+  if (['approved', 'dismissed'].includes(status) && row.status !== 'drafted') return false;
+  await d.run(`UPDATE followups SET status = ?${status === 'sent' ? ', sent_at = ?' : ''} WHERE id = ?`,
+    status === 'sent' ? [status, now(), id] : [status, id]);
+  return true;
+}
+
+export async function followupsToSend() {
+  const d = await db();
+  return d.query(`SELECT * FROM followups WHERE status = 'approved' ORDER BY id`);
+}
+
+/** Replies and follow-ups sent for a user since `sinceIso` (report / portal). */
+export async function emailsSent(userId, sinceIso) {
+  const d = await db();
+  const replies = await d.query(`SELECT 'reply' AS kind, company, from_addr AS to_addr, subject, auto_reply AS auto, sent_at FROM inbox_events
+    WHERE user_id = ? AND reply_status = 'sent' AND sent_at > ?`, [userId, sinceIso]);
+  const fus = await d.query(`SELECT 'followup' AS kind, e.company, f.to_addr, f.subject, f.auto, f.sent_at FROM followups f
+    LEFT JOIN inbox_events e ON e.id = f.event_id WHERE f.user_id = ? AND f.status = 'sent' AND f.sent_at > ?`, [userId, sinceIso]);
+  return [...replies, ...fus].sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at)));
+}
+
+/**
+ * Every employer email and what was sent back, oldest first, for the Applications page:
+ * [{ queue_id, at, dir: 'in'|'out', kind, text, company, auto }].
+ */
+export async function emailTimeline(userId) {
+  const d = await db();
+  const evs = await d.query(`SELECT id, queue_id, company, from_addr, subject, category, reply_status, auto_reply, received_at, created_at, sent_at
+    FROM inbox_events WHERE user_id = ? ORDER BY id`, [userId]);
+  const fus = await d.query(`SELECT f.queue_id, f.n, f.status, f.auto, f.sent_at, f.created_at, e.company FROM followups f
+    LEFT JOIN inbox_events e ON e.id = f.event_id WHERE f.user_id = ? ORDER BY f.id`, [userId]);
+  const out = [];
+  for (const e of evs) {
+    out.push({ queue_id: e.queue_id, at: e.received_at || e.created_at, dir: 'in', kind: e.category, text: e.subject, company: e.company || e.from_addr });
+    if (e.reply_status === 'sent') out.push({ queue_id: e.queue_id, at: e.sent_at, dir: 'out', kind: 'reply', auto: !!Number(e.auto_reply), company: e.company });
+    else if (['drafted', 'approved'].includes(e.reply_status)) out.push({ queue_id: e.queue_id, at: e.created_at, dir: 'out', kind: e.reply_status === 'drafted' ? 'reply_waiting' : 'reply_queued', company: e.company });
+  }
+  for (const f of fus) {
+    if (f.status === 'sent') out.push({ queue_id: f.queue_id, at: f.sent_at, dir: 'out', kind: 'followup', n: f.n, auto: !!Number(f.auto), company: f.company });
+    else if (f.status === 'drafted') out.push({ queue_id: f.queue_id, at: f.created_at, dir: 'out', kind: 'followup_waiting', n: f.n, company: f.company });
+  }
+  return out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
 export async function repliesToSend() {

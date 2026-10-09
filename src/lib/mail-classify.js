@@ -61,9 +61,12 @@ export async function classifyEmail(mail, { profile = {}, application = null } =
   const a = profile.answers || {};
   const facts = [
     `Name: ${profile.name || ''}`,
-    a.noticePeriodDays !== '' && a.noticePeriodDays != null ? `Notice period: ${a.noticePeriodDays} days` : '',
+    a.noticePeriodDays !== '' && a.noticePeriodDays != null ? `Notice period: ${Number(a.noticePeriodDays) === 0 ? 'can join immediately' : `${a.noticePeriodDays} days`}` : '',
+    profile.baseCity ? `Current city: ${String(profile.baseCity).replace(/\b\w/g, (ch) => ch.toUpperCase())}` : '',
+    profile.totalExpYears != null ? `Total experience: ${profile.totalExpYears} years` : '',
     a.phone ? `Phone: ${a.phone}` : '',
-    a.linkedin ? `LinkedIn: ${a.linkedin}` : '',
+    a.linkedin ? `LinkedIn: ${String(a.linkedin).replace(/[?#].*$/, '')}` : '',
+    'CV: can be attached to the reply',
   ].filter(Boolean).join('\n');
 
   const prompt = `You read emails in a job seeker's inbox. Classify this one and, only if a reply is clearly expected, draft it.
@@ -78,7 +81,8 @@ Categories:
 - other: job-related but none of the above, or not about a job application
 
 Draft rules (draft_reply):
-- Only for interview, assessment, info_request or offer. Otherwise null.
+- Only for interview, assessment, info_request or offer, or "other" when a recruiter writes personally about a
+  role (then: thank them, say the candidate is interested, and that the CV is attached). Otherwise null.
 - Short, polite, plain, from the candidate in first person, signed with their name.
 - Use ONLY these facts:\n${facts}
 - Never invent availability, dates, salary figures, or documents. For an interview, thank them and ask them to share
@@ -92,14 +96,22 @@ From: ${mail.from}
 Subject: ${mail.subject}
 ${String(mail.text || '').slice(0, 5000)}
 
-Return ONLY JSON: {"category":"...","company":"employer name or null","summary":"one or two plain sentences, what they want and by when","draft_reply":"..." or null,"needs":"what the candidate must provide, or null"}`;
+Also report:
+- "asks": what the email asks the candidate for, from this list only: interest (are you interested / still
+  interested), cv, notice_period, location, experience, availability_dates (interview or call times), salary,
+  documents (anything other than a CV), questions (anything else to answer), assessment, offer. [] if nothing.
+- "real_person": true if a person wrote it to the candidate (a recruiter or hiring manager), false for automated
+  or bulk mail.
+
+Return ONLY JSON: {"category":"...","company":"employer name or null","summary":"one or two plain sentences, what they want and by when","draft_reply":"..." or null,"needs":"what the candidate must provide, or null","asks":[],"real_person":true}`;
 
   const r = await generate(prompt, { json: true, temperature: 0.2, maxTokens: 1200 });
   if (!r.ok) return { ok: false, error: r.error };
   const out = parse(r.text);
   if (!out || !CATEGORIES.includes(out.category)) return { ok: false, error: 'unusable classification' };
-  const draft = out.draft_reply && ['interview', 'assessment', 'info_request', 'offer'].includes(out.category)
-    ? humanize(String(out.draft_reply).trim(), { allowEmDash: false }) : null;
+  const draft = out.draft_reply && (['interview', 'assessment', 'info_request', 'offer'].includes(out.category) || (out.category === 'other' && out.real_person === true))
+    // Line by line: humanize() folds whitespace, and an email needs its line breaks.
+    ? String(out.draft_reply).trim().split('\n').map((l) => humanize(l, { allowEmDash: false })).join('\n') : null;
   return {
     ok: true,
     category: out.category,
@@ -107,5 +119,9 @@ Return ONLY JSON: {"category":"...","company":"employer name or null","summary":
     summary: String(out.summary || '').slice(0, 400),
     draftReply: draft,
     needs: out.needs || null,
+    asks: (Array.isArray(out.asks) ? out.asks : []).map(String).filter((x) => ASKS.includes(x)),
+    realPerson: out.real_person === true,
   };
 }
+
+const ASKS = ['interest', 'cv', 'notice_period', 'location', 'experience', 'availability_dates', 'salary', 'documents', 'questions', 'assessment', 'offer'];

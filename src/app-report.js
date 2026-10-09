@@ -7,6 +7,7 @@
 import { db } from './db/driver.js';
 import { sendEmail, emailConfigured } from './email.js';
 import { loadProfileAsync } from './lib/profile.js';
+import { emailsSent } from './db.js';
 
 export const REPORT_CC = (process.env.REPORT_CC || 'virtualgen360@gmail.com').split(',').map((s) => s.trim()).filter(Boolean);
 const SITE = () => (process.env.SITE_URL || 'https://jobvibe.evergreenskill.com').replace(/\/+$/, '');
@@ -26,7 +27,7 @@ const WORDS = {
   unconfirmed: 'Sent, waiting for the employer to confirm', closed: 'The employer closed this job', ineligible: 'Not eligible (your answers rule it out)',
   already_applied: 'Already applied', failed: 'Could not apply', skipped: 'Skipped', held: 'On hold',
 };
-const EMAIL_WORDS = { interview: '📅 Interview', assessment: '📝 Assessment', offer: '🎉 Offer', info_request: '📎 They need something', rejection: 'Not selected', received: 'Application received' };
+const EMAIL_WORDS = { interview: '📅 Interview', assessment: '📝 Assessment', offer: '🎉 Offer', info_request: '📎 They need something', rejection: 'Not selected', received: 'Application received', other: '✉️ Recruiter reached out' };
 
 /** Users with any application activity in the last `days` days. */
 async function activeUsers(days = 30) {
@@ -47,7 +48,7 @@ async function rowsFor(userId) {
 async function emailsFor(userId) {
   const d = await db();
   return d.query(`SELECT company, from_addr, subject, category, summary, created_at FROM inbox_events
-    WHERE user_id = ? AND created_at > ? AND category NOT IN ('other') ORDER BY created_at DESC`,
+    WHERE user_id = ? AND created_at > ? AND (category <> 'other' OR draft_reply IS NOT NULL) ORDER BY created_at DESC`,
   [userId, new Date(Date.now() - 26 * 3600000).toISOString()]);
 }
 
@@ -70,8 +71,8 @@ function friendly(r) {
 const appliedByUser = (r) => r.status === 'manual' && /applied (herself|himself|themselves|yourself)/i.test(r.reason || '');
 
 /** Build one user's report. Returns null when there is nothing to report. */
-export function buildAppReport({ name, rows: all, emails }) {
-  if (!all.length && !emails.length) return null;
+export function buildAppReport({ name, rows: all, emails, sent = [] }) {
+  if (!all.length && !emails.length && !sent.length) return null;
   // Jobs the user applied to herself count as applied, not as "apply yourself".
   const rows = all.map((r) => (appliedByUser(r) ? { ...r, status: 'submitted', reason: 'You applied yourself.', byUser: true } : r));
   const count = (key) => rows.filter((r) => SECTIONS.find((s) => s.key === key).statuses.includes(r.status)).length;
@@ -98,10 +99,13 @@ export function buildAppReport({ name, rows: all, emails }) {
   }).join('');
   const mail = emails.length ? `<h3 style="margin:22px 0 6px;font-size:15px">✉️ Employer emails (last 24 hours)</h3><ul style="padding-left:18px;font-size:13px">${emails.map((e) =>
     `<li><b>${esc(EMAIL_WORDS[e.category] || e.category)}</b>: ${esc(e.company || e.from_addr)}: “${esc(e.subject)}”<br><span style="color:#475467">${esc(e.summary || '')}</span></li>`).join('')}</ul>` : '';
+  // What the agent wrote to employers on her behalf: replies and follow-ups.
+  const out = sent.length ? `<h3 style="margin:22px 0 6px;font-size:15px">📤 Emails sent for you (last 24 hours)</h3><ul style="padding-left:18px;font-size:13px">${sent.map((e) =>
+    `<li><b>${e.kind === 'followup' ? 'Follow-up' : 'Reply'}</b> to ${esc(e.company || e.to_addr)}: “${esc(e.subject)}” <span style="color:#667085">${Number(e.auto) ? '(automatic)' : '(you approved)'}</span></li>`).join('')}</ul>` : '';
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:720px;color:#101828">
     <h2 style="margin:0 0 4px">Your applications · ${esc(today)}</h2>
     <p style="margin:0;color:#475467">Hi ${esc((name || '').split(' ')[0] || 'there')}, here is where every job you approved stands.</p>
-    ${sections}${mail}
+    ${sections}${mail}${out}
     <p style="margin-top:24px;font-size:12px;color:#667085">Approve jobs in Telegram; the agent applies with a CV tailored to each one. Full list: <a href="${SITE()}/applications">${SITE()}/applications</a></p></div>`;
   return { subject, html };
 }
@@ -114,7 +118,8 @@ export async function sendAppReports({ only = null, dryRun = false } = {}) {
     if (only && u.user_id !== only) continue;
     const profile = await loadProfileAsync(u.user_id);
     const to = (profile.emailTo || [])[0] || u.email;
-    const report = buildAppReport({ name: profile.name, rows: await rowsFor(u.user_id), emails: await emailsFor(u.user_id) });
+    const report = buildAppReport({ name: profile.name, rows: await rowsFor(u.user_id), emails: await emailsFor(u.user_id),
+      sent: await emailsSent(u.user_id, new Date(Date.now() - 26 * 3600000).toISOString()) });
     if (!report || !to) { out.skipped++; continue; }
     if (dryRun) { out.previews.push({ to, cc: REPORT_CC, ...report }); continue; }
     const r = await sendEmail({ to, cc: REPORT_CC.filter((c) => c.toLowerCase() !== to.toLowerCase()), subject: report.subject, html: report.html });

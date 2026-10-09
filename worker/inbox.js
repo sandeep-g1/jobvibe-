@@ -2,7 +2,9 @@
 // classify job emails, alert the user on Telegram with a drafted reply, and
 // send replies only after the user taps "Send" there.
 import { createRequire } from 'node:module';
-import { insertInboxEvent, applicationsForMatching, updateQueueItem, repliesToSend, setReplyStatus, saveProfileRow, markApplied } from '../src/db.js';
+import { insertInboxEvent, applicationsForMatching, updateQueueItem, repliesToSend, setReplyStatus, saveProfileRow, markApplied,
+  approveAutoReply, queueCv, defaultResume } from '../src/db.js';
+import { replyPolicy, attachCv } from '../src/lib/reply-policy.js';
 import { decrypt } from '../src/lib/secrets.js';
 import { loadProfileAsync } from '../src/lib/profile.js';
 import { looksJobRelated, matchApplication, classifyEmail } from '../src/lib/mail-classify.js';
@@ -113,7 +115,7 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
     const id = await insertInboxEvent({
       user_id: userId, uid: mail.uid, queue_id: app?.id ?? null, company: c.company, from_addr: mail.fromAddr || mail.from,
       subject: mail.subject, category: c.category, summary: c.summary, draft_reply: c.draftReply, message_id: mail.messageId,
-      received_at: mail.date,
+      received_at: mail.date, asks: c.asks, attach_cv: c.draftReply && attachCv(c),
     });
     if (!id) continue; // seen before
     found++;
@@ -135,13 +137,24 @@ export async function checkInbox(userId, { fetcher = fetchNewMail } = {}) {
         app.detail = JSON.stringify({ ...detail, lastEmail: c.category }); // later mails in this batch see it
       }
     }
-    if (c.category === 'received' || c.category === 'other') continue; // no need to ping for these
+    // No need to ping for these (a recruiter writing personally does get a draft, below).
+    if (c.category === 'received' || (c.category === 'other' && !c.draftReply)) continue;
 
     const head = `<b>${LABEL[c.category]}</b>: ${h(c.company || mail.from)}${app ? ` · ${h(app.title)}` : ''}\n${h(c.summary)}`;
-    if (c.draftReply) {
-      await tell(profile, `${head}\n\n<b>Draft reply</b> (to ${h(mail.fromAddr || mail.from)}):\n<i>${h(c.draftReply)}</i>`, {
+    const policy = replyPolicy(c, { app, fromAddr: mail.fromAddr, profile });
+    const cv = c.draftReply && attachCv(c) ? '\n📎 Your CV goes with it.' : '';
+    if (policy.mode === 'auto') {
+      // Routine answer to a verified recruiter: goes out on the next tick, no tap needed.
+      await approveAutoReply(id);
+      await tell(profile, `${head}\n\n🤖 <b>Replying for you</b> (to ${h(mail.fromAddr)}):\n<i>${h(c.draftReply)}</i>${cv}`);
+    } else if (policy.mode === 'confirm') {
+      // Why it waits for her, beyond the switch being off (that one is the same every time).
+      const why = policy.why.filter((w) => w !== 'automatic replies are off');
+      await tell(profile, `${head}\n\n<b>Draft reply</b> (to ${h(mail.fromAddr || mail.from)}):\n<i>${h(c.draftReply)}</i>${cv}${why.length ? `\n\n<i>Needs your OK: ${h(why.join('; '))}.</i>` : ''}`, {
         buttons: [[{ text: '✉️ Send this reply', callback_data: `rs:${id}` }, { text: '✋ I\'ll handle it', callback_data: `rd:${id}` }]],
       });
+    } else if (c.draftReply) {
+      await tell(profile, `${head}\n\nIt came from an address that doesn't take replies, so I haven't drafted one.`);
     } else {
       await tell(profile, `${head}${c.needs ? `\n\n<b>They need:</b> ${h(c.needs)}\nReply to them from your Gmail.` : ''}`);
     }
@@ -167,16 +180,33 @@ export async function sendApprovedReplies() {
     const transport = process.env.MAIL_TRANSPORT_JSON === '1'
       ? nodemailer.createTransport({ jsonTransport: true })
       : nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: mb.email, pass: decrypt(mb.passEnc) } });
+    // The CV she applied with (the one tailored for that job), else her main resume.
+    let attachments = [];
+    if (ev.attach_cv) {
+      const q = ev.queue_id ? await queueCv(ev.queue_id, ev.user_id) : null;
+      const r = q?.cv_b64 ? null : await defaultResume(ev.user_id);
+      const file = q?.cv_b64 ? { filename: q.cv_name, content: q.cv_b64 } : r?.content_b64 ? { filename: r.filename, content: r.content_b64 } : null;
+      if (!file) {
+        // The draft says the CV is attached: never send it without one.
+        await setReplyStatus(ev.id, ev.user_id, 'failed');
+        await tell(profile, `⚠️ The reply to ${h(ev.from_addr)} needs your CV attached and I couldn't find one. Upload it in JobVibe or reply from Gmail.`);
+        continue;
+      }
+      // Employers see "<Name>_CV.docx", as on application forms (her copy is named by company).
+      const ext = String(file.filename || '').match(/\.(\w+)$/)?.[1] || 'docx';
+      const who = String(profile.name || 'Resume').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+      attachments = [{ filename: `${who}_CV.${ext}`, content: Buffer.from(file.content, 'base64') }];
+    }
     try {
       const info = await transport.sendMail({
         from: `${profile.name || ''} <${mb.email}>`, to: ev.from_addr,
         subject: /^re:/i.test(ev.subject || '') ? ev.subject : `Re: ${ev.subject || ''}`,
-        text: ev.draft_reply,
+        text: ev.draft_reply, attachments,
         ...(ev.message_id ? { inReplyTo: ev.message_id, references: ev.message_id } : {}),
       });
       if (process.env.MAIL_TRANSPORT_JSON === '1') console.log(`[test transport] ${info.message}`);
       await setReplyStatus(ev.id, ev.user_id, 'sent');
-      await tell(profile, `✉️ Reply sent to ${h(ev.from_addr)} (${h(ev.company || ev.subject || '')}).`);
+      await tell(profile, `✉️ Reply sent to ${h(ev.from_addr)} (${h(ev.company || ev.subject || '')})${attachments.length ? `, with ${h(attachments[0].filename)}` : ''}${ev.auto_reply ? ' · automatic' : ''}.`);
       sent++;
     } catch (err) {
       await setReplyStatus(ev.id, ev.user_id, 'failed');

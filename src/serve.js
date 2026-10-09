@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, queueCv,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, emailTimeline, queueCv,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -422,7 +422,7 @@ export async function handler(req, res) {
     }
 
     if (path === '/applications') {
-      return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid)));
+      return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid), await emailTimeline(uid)));
     }
     const cvm = path.match(/^\/applications\/(\d+)\/cv$/);
     if (cvm) {
