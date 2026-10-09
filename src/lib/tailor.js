@@ -129,7 +129,7 @@ Also list, from the JD, every NAMED tool, technology, platform, programming lang
 (e.g. Selenium, Snowflake, SWIFT, ISO 20022, Tableau, CSM), whether or not it is in your 25.
 JOB: ${job.title || ''} at ${job.company || ''}
 ${String(job.jd_text || '').slice(0, 12000)}
-Return ONLY JSON: {"keywords":["..."],"named":["..."]}`, { json: true, temperature: 0, maxTokens: 2048, model, timeoutMs: 120000 });
+Return ONLY JSON: {"keywords":["..."],"named":["..."]}`, { json: true, temperature: 0, maxTokens: 2048, model, timeoutMs: 240000 });
   const p = r.ok ? parseJson(r.text) : null;
   const list = (p?.keywords || []).map(String).filter(Boolean).slice(0, 25);
   const named = (p?.named || []).map(String).filter(Boolean).slice(0, 40);
@@ -186,7 +186,7 @@ she has done (e.g. "sprint planning" for someone who ran Agile delivery). "no": 
 KEYWORDS: ${kw.keywords.join(' | ')}
 HER EXPERIENCE:
 ${facts.slice(0, 14000)}
-Return ONLY JSON: {"<keyword>":"yes|close|no", ...}`, { json: true, temperature: 0, maxTokens: 2048, model: keywordModel, timeoutMs: 120000 });
+Return ONLY JSON: {"<keyword>":"yes|close|no", ...}`, { json: true, temperature: 0, maxTokens: 2048, model: keywordModel, timeoutMs: 240000 });
   const verdict = sup.ok ? parseJson(sup.text) || {} : {};
   for (const k of kw.keywords) if (verdict[k] === 'no' && !lacks.includes(k)) lacks.push(k);
   const target = kw.keywords.filter((k) => !lacks.some((n) => n.toLowerCase() === k.toLowerCase()));
@@ -258,7 +258,7 @@ ${editable.map((l) => `[${l.index}] (${l.section}) ${l.text}`).join('\n').slice(
 
 Return ONLY JSON: {"keywords":["..."],"edits":{"<id>":"<rewritten line>"},"gaps":["..."]}`;
 
-  const r = await generate(prompt, { json: true, temperature: 0.35, maxTokens: 8192, model, timeoutMs: 120000 });
+  const r = await generate(prompt, { json: true, temperature: 0.35, maxTokens: 24000, model, timeoutMs: 240000 });
   if (!r.ok) return { ok: false, error: r.error };
   const usage = { model: r.model, in: (r.usage?.in || 0) + (kw.usage?.in || 0) + (sup.usage?.in || 0), out: (r.usage?.out || 0) + (kw.usage?.out || 0) + (sup.usage?.out || 0) };
   const parsed = parseJson(r.text);
@@ -389,7 +389,7 @@ PROBLEM: ${f.why}`).join('\n\n')}
 ${allowed.length ? `ALLOWED ADDITIONS: ${allowed.map((a) => a.skill).join(', ')}
 ` : ''}CANDIDATE SKILLS: ${candidate.join(', ').slice(0, 1200)}
 Return ONLY JSON: {"edits":{"<id>":"<rewritten line>"}}`;
-    const r2 = await generate(fix, { json: true, temperature: 0.2, maxTokens: 4096, model, timeoutMs: 120000 });
+    const r2 = await generate(fix, { json: true, temperature: 0.2, maxTokens: 8192, model, timeoutMs: 240000 });
     if (r2.ok) { usage.in += r2.usage?.in || 0; usage.out += r2.usage?.out || 0; }
     const p2 = r2.ok ? parseJson(r2.text) : null;
     accept(p2?.edits || {}, 2);
@@ -401,7 +401,7 @@ Return ONLY JSON: {"edits":{"<id>":"<rewritten line>"}}`;
   const current = (l) => valid[l.index] ?? l.text;
   const fullText = () => lines.map(current).join('\n');
   const spend = (x) => { if (x?.ok) { usage.in += x.usage?.in || 0; usage.out += x.usage?.out || 0; } };
-  const opts = { json: true, temperature: 0.2, maxTokens: 6144, model, timeoutMs: 120000 };
+  const opts = { json: true, temperature: 0.2, maxTokens: 16000, model, timeoutMs: 240000 };
 
   // Premium jobs (reputed employer, good pay): one more pass at the keywords still missing.
   // Each new edit passes the same checks; one that would stuff a keyword is dropped.
