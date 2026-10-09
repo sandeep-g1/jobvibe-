@@ -532,6 +532,43 @@ export async function queueForUser(userId, limit = 12) {
       WHERE q.user_id = ? ORDER BY q.updated_at DESC LIMIT ?`, [userId, limit]);
 }
 
+/* ---------------- tailor requests (website "Tailor CV" button) ---------------- */
+
+/** The newest request for this job, or a new pending one. A done CV is reused for a day. */
+export async function requestTailoring(userId, fingerprint) {
+  const d = await db();
+  const dayAgo = new Date(Date.now() - 86400000).toISOString();
+  const open = await d.one(`SELECT id, status FROM tailor_requests WHERE user_id = ? AND fingerprint = ?
+    AND (status IN ('pending', 'running') OR (status = 'done' AND done_at > ?)) ORDER BY id DESC LIMIT 1`, [userId, fingerprint, dayAgo]);
+  if (open) return { id: num(open.id), status: open.status };
+  const id = num(await d.insertReturningId(`INSERT INTO tailor_requests (user_id, fingerprint, status, created_at) VALUES (?,?,?,?)`,
+    [userId, fingerprint, 'pending', now()]));
+  return { id, status: 'pending' };
+}
+
+/** Owner-scoped request, with the CV only when asked for. */
+export async function tailorRequest(id, userId, { withCv = false } = {}) {
+  const d = await db();
+  return d.one(`SELECT id, status, error, cv_name, meta, created_at, done_at${withCv ? ', cv_b64' : ''} FROM tailor_requests WHERE id = ? AND user_id = ?`, [id, userId]);
+}
+
+/** Worker: claim the oldest pending request (pending → running). */
+export async function claimTailorRequest() {
+  const d = await db();
+  // A request stuck in 'running' for 20 minutes (worker restarted mid-way) is taken again.
+  const stale = new Date(Date.now() - 20 * 60000).toISOString();
+  const row = await d.one(`SELECT * FROM tailor_requests WHERE status = 'pending' OR (status = 'running' AND created_at < ?) ORDER BY id LIMIT 1`, [stale]);
+  if (!row) return null;
+  await d.run(`UPDATE tailor_requests SET status = 'running', created_at = ? WHERE id = ?`, [now(), row.id]);
+  return { ...row, id: num(row.id) };
+}
+
+export async function finishTailorRequest(id, { ok, error, name, buffer, meta }) {
+  const d = await db();
+  await d.run(`UPDATE tailor_requests SET status = ?, error = ?, cv_name = ?, cv_b64 = ?, meta = ?, done_at = ? WHERE id = ?`,
+    [ok ? 'done' : 'failed', error ?? null, name ?? null, buffer ? buffer.toString('base64') : null, meta ? JSON.stringify(meta) : null, now(), id]);
+}
+
 /* ---------------- inbox ---------------- */
 
 /** Store one classified email. Returns the new row id, or null if already stored. */

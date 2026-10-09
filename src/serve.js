@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, emailTimeline, queueCv,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, emailTimeline, queueCv, requestTailoring, tailorRequest,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -34,7 +34,6 @@ import { telegramConfigured, webhookSecret, handleUpdate, botUsername, newLinkCo
 import { extractText } from './lib/resume.js';
 import { parseResume, geminiConfigured } from './lib/gemini.js';
 import Busboy from 'busboy';
-import { tailorResume } from './lib/tailor.js';
 
 const PORT = Number(process.env.PORT || 3100);
 const PASSWORD = cleanEnv(process.env.APP_PASSWORD);
@@ -535,27 +534,27 @@ export async function handler(req, res) {
         return send(res, 400, 'application/json',
           JSON.stringify({ error: 'Tailoring needs a .docx CV. Re-upload as .docx to enable it.' }));
       }
-      const p = await profile(uid);
-      const r = await tailorResume(Buffer.from(resume.content_b64, 'base64'), j, p.skillBank || [], {
-        stretch: p.stretchSkills !== false, // on unless the user turned it off
-        yearsExp: p.totalExpYears ?? null,
-        extraFacts: p.extraCvText || '',
-      });
-      if (!r.ok) return send(res, 502, 'application/json', JSON.stringify({ error: r.error }));
+      // Tailoring takes minutes (longer than a web request may run): the worker does it and
+      // the page polls /api/tailor/<id> until the CV is ready.
+      const reqd = await requestTailoring(uid, j.fingerprint);
+      return send(res, 202, 'application/json', JSON.stringify(reqd));
+    }
 
-      const safe = (s2) => String(s2 || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
-      const fname = `${safe(p.name || 'Resume')}_${safe(j.company)}_${safe(j.title)}.docx`;
+    const tm = path.match(/^\/api\/tailor\/(\d+)(\/file)?$/);
+    if (tm && req.method === 'GET') {
+      const row = await tailorRequest(Number(tm[1]), uid, { withCv: !!tm[2] });
+      if (!row) return send(res, 404, 'application/json', '{"error":"not found"}');
+      if (!tm[2]) {
+        let meta = {}; try { meta = JSON.parse(row.meta || '{}'); } catch { /* none */ }
+        return send(res, 200, 'application/json', JSON.stringify({ id: Number(row.id), status: row.status, error: row.error, ...meta }));
+      }
+      if (row.status !== 'done' || !row.cv_b64) return send(res, 409, 'application/json', '{"error":"not ready"}');
       res.writeHead(200, {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="${fname}"`,
-        'X-Tailor-Changed': String(r.changed),
-        'X-Tailor-Gaps': encodeURIComponent((r.gaps || []).join(' | ')),
-        'X-Tailor-Ats': `${r.ats?.before ?? ''},${r.ats?.after ?? ''}`,
-        'X-Tailor-Added': encodeURIComponent((r.added || []).map((a) => `${a.skill} <- ${a.basedOn}`).join('; ')),
-        'Access-Control-Expose-Headers': 'Content-Disposition, X-Tailor-Changed, X-Tailor-Gaps, X-Tailor-Ats, X-Tailor-Added',
+        'Content-Disposition': `attachment; filename="${String(row.cv_name || 'Resume.docx').replace(/"/g, '')}"`,
         'Cache-Control': 'no-store',
       });
-      return res.end(r.buffer);
+      return res.end(Buffer.from(row.cv_b64, 'base64'));
     }
 
     if (path === '/api/skills/add' && req.method === 'POST') {

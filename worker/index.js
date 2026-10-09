@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
   claimDestination, saveProfileRow, matchTailoring, recentApplicationAt,
+  claimTailorRequest, finishTailorRequest, jobByFingerprint,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
@@ -322,6 +323,35 @@ async function processItem(item, browser) {
   return save('failed', r.reason, { filled }, attempts);
 }
 
+/* ---------------- website "Tailor CV" requests ---------------- */
+// The website can't wait minutes for a tailored CV, so it queues a request and the worker
+// makes it here, with the same pipeline used for applications.
+async function tailorTick() {
+  for (let n = 0; n < 2; n++) {
+    const reqd = await claimTailorRequest();
+    if (!reqd) return;
+    try {
+      const job = await jobByFingerprint(reqd.fingerprint);
+      const cvRow = await defaultResume(reqd.user_id);
+      if (!job || !cvRow?.content_b64 || cvRow.kind !== 'docx') {
+        await finishTailorRequest(reqd.id, { ok: false, error: !job ? 'job not found' : 'a .docx CV is needed' });
+        continue;
+      }
+      const profile = await loadProfileAsync(reqd.user_id);
+      const prem = await isPremium(job, profile).catch(() => ({ premium: false }));
+      const t = await tailorResume(Buffer.from(cvRow.content_b64, 'base64'), job, profile.skillBank || [], {
+        stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null, push: prem.premium, extraFacts: profile.extraCvText || '' });
+      if (!t.ok) { await finishTailorRequest(reqd.id, { ok: false, error: t.error }); continue; }
+      const cv = await ownDocx(t.buffer, profile.name);
+      await finishTailorRequest(reqd.id, { ok: true, name: `${safe(profile.name || 'Resume')}_CV.docx`, buffer: cv,
+        meta: { changed: t.changed, gaps: t.gaps || [], ats: [t.ats?.before ?? '', t.ats?.after ?? ''], added: (t.added || []).map((a) => `${a.skill} <- ${a.basedOn}`) } });
+      log(`tailored a CV for ${job.company} · ${job.title} (website request ${reqd.id})`);
+    } catch (err) {
+      await finishTailorRequest(reqd.id, { ok: false, error: err.message });
+    }
+  }
+}
+
 /* ---------------- inbox ---------------- */
 const INBOX_EVERY_MS = 10 * 60 * 1000;
 const lastInbox = new Map();
@@ -400,6 +430,7 @@ async function main() {
   if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
   const codeAtStart = codeStamp();
   for (;;) {
+    try { await tailorTick(); } catch (err) { log(`tailor requests failed: ${err.message}`); }
     try { await inboxTick(); } catch (err) { log(`inbox tick failed: ${err.message}`); }
     try { await tick(browser); } catch (err) { log(`tick failed: ${err.message}`); }
     // Code changed on disk (a fix was made): stop between jobs, so worker/always-on.ps1

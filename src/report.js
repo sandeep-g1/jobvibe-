@@ -435,36 +435,39 @@ function toast(msg){
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// Tailoring takes 2-3 minutes, so the agent's worker makes the CV and this page checks back.
 async function tailorCV(btn, fp){
-  var old = btn.textContent; btn.disabled = true; btn.textContent = 'Tailoring…';
+  var old = btn.textContent; btn.disabled = true; btn.textContent = 'Preparing your CV… (2-3 min)';
+  var reset = function(){ btn.disabled=false; btn.textContent=old; };
   try {
     var res = await fetch('/api/tailor', {
       method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
       body:'fingerprint='+encodeURIComponent(fp)
     });
-    if (!res.ok) {
-      var e = await res.json().catch(function(){return {error:'Failed'};});
-      alert(e.error || 'Could not tailor the CV.');
-      btn.disabled = false; btn.textContent = old; return;
+    var r = await res.json().catch(function(){return {error:'Failed'};});
+    if (!res.ok || !r.id) { alert(r.error || 'Could not tailor the CV.'); reset(); return; }
+    var started = Date.now();
+    for (;;) {
+      if (r.status === 'done') break;
+      if (r.status === 'failed') { alert('Could not tailor the CV: '+(r.error || 'unknown error')); reset(); return; }
+      if (Date.now() - started > 10*60*1000) { alert('Still preparing. The agent may be busy or not running; try again in a few minutes.'); reset(); return; }
+      if (r.status === 'pending' && Date.now() - started > 90*1000) btn.textContent = 'Waiting for the agent to start…';
+      else if (r.status === 'running') btn.textContent = 'Tailoring your CV…';
+      await new Promise(function(ok){ setTimeout(ok, 5000); });
+      r = await (await fetch('/api/tailor/'+r.id)).json();
     }
-    var blob = await res.blob();
+    var file = await fetch('/api/tailor/'+r.id+'/file');
+    if (!file.ok) { alert('Could not download the CV.'); reset(); return; }
     var name = 'Resume.docx';
-    var cd = res.headers.get('Content-Disposition') || '';
-    var mm = cd.match(/filename="([^"]+)"/); if (mm) name = mm[1];
+    var mm = (file.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/); if (mm) name = mm[1];
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = name;
+    a.href = URL.createObjectURL(await file.blob()); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
-    var changed = res.headers.get('X-Tailor-Changed') || '?';
-    var gaps = decodeURIComponent(res.headers.get('X-Tailor-Gaps') || '')
-      .split(' | ').map(function(s){return s.trim();}).filter(Boolean);
-    var ats = (res.headers.get('X-Tailor-Ats') || '').split(',');
-    var added = decodeURIComponent(res.headers.get('X-Tailor-Added') || '')
-      .split('; ').filter(Boolean);
     btn.textContent = '✓ Downloaded';
-    showGapPanel(changed, gaps, ats, added);
-    setTimeout(function(){ btn.disabled=false; btn.textContent=old; }, 4000);
+    showGapPanel(String(r.changed ?? '?'), r.gaps || [], r.ats || ['', ''], r.added || []);
+    setTimeout(reset, 4000);
   } catch (err) {
-    alert('Error: '+err.message); btn.disabled=false; btn.textContent=old;
+    alert('Error: '+err.message); reset();
   }
 }
 

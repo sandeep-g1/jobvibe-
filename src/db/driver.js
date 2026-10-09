@@ -373,6 +373,21 @@ const TABLES = (pk, json) => `
     updated_at    TEXT NOT NULL
   );
 
+  -- "Tailor CV" requests from the website: the worker does the tailoring (it takes minutes,
+  -- longer than a web request may run) and the page polls. status: pending|running|done|failed
+  CREATE TABLE IF NOT EXISTS tailor_requests (
+    id            ${pk},
+    user_id       TEXT NOT NULL,
+    fingerprint   TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    error         TEXT,
+    cv_name       TEXT,
+    cv_b64        TEXT,
+    meta          TEXT,
+    created_at    TEXT NOT NULL,
+    done_at       TEXT
+  );
+
   -- Must-have check of a job against one user's CV (src/lib/eligibility.js), done once.
   CREATE TABLE IF NOT EXISTS eligibility (
     user_id       TEXT NOT NULL,
