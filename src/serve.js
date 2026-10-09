@@ -539,6 +539,7 @@ export async function handler(req, res) {
       const r = await tailorResume(Buffer.from(resume.content_b64, 'base64'), j, p.skillBank || [], {
         stretch: p.stretchSkills !== false, // on unless the user turned it off
         yearsExp: p.totalExpYears ?? null,
+        extraFacts: p.extraCvText || '',
       });
       if (!r.ok) return send(res, 502, 'application/json', JSON.stringify({ error: r.error }));
 

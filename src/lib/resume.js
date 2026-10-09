@@ -36,11 +36,11 @@ export async function extractText(buffer, filename, mime) {
     }
     if (kind === 'pdf') {
       // pdf-parse is loaded lazily: it is heavier and only needed for PDFs.
-      const mod = await import('pdf-parse/lib/pdf-parse.js').catch(() => null);
+      // pdf-parse 2.x exports a PDFParse class (1.x was a function at lib/pdf-parse.js).
+      const mod = await import('pdf-parse').catch(() => import('pdf-parse/lib/pdf-parse.js')).catch(() => null);
       if (!mod) return { ok: false, kind, error: 'PDF parsing is unavailable — please upload a .docx.' };
-      const pdf = mod.default || mod;
-      const out = await pdf(buffer);
-      return { ok: true, kind, text: (out.text || '').trim() };
+      const out = mod.PDFParse ? await new mod.PDFParse({ data: buffer }).getText() : await (mod.default || mod)(buffer);
+      return { ok: true, kind, text: (out.text || '').replace(/-- \d+ of \d+ --/g, '').trim() };
     }
   } catch (err) {
     return { ok: false, kind, error: `Could not read the file (${err.message}).` };

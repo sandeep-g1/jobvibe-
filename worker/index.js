@@ -34,6 +34,7 @@ import { atsOf, destKey } from './apply/forms.js';
 import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
 import { planFollowups, sendFollowups } from './followups.js';
+import { isPremium } from '../src/lib/premium.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -223,7 +224,8 @@ async function processItem(item, browser) {
     let added = []; try { added = JSON.parse(pre.tailor_added || '[]'); } catch { /* none */ }
     tailoring = { ats: pre.ats_after != null ? { before: pre.ats_before, after: pre.ats_after } : null, added };
   } else if (ext === 'docx') {
-    const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
+    const prem = await isPremium(job, profile).catch(() => ({ premium: false }));
+    const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null, push: prem.premium, extraFacts: profile.extraCvText || '' });
     if (t.ok) { cv = t.buffer; tailored = true; tailoring = { ats: t.ats ? { before: t.ats.before, after: t.ats.after } : null, added: t.added || [] }; }
   }
   // What the employer receives: "<Name>_CV.docx", with her name in the file's properties.

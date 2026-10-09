@@ -15,10 +15,11 @@ export function geminiConfigured() {
 }
 
 /**
- * One text generation call. Tries models in order until one is available.
+ * One text generation call. Tries models in order until one is available
+ * (or only `model`, when given: e.g. a pro model for resume tailoring).
  * @returns {{ ok:boolean, text?:string, error?:string }}
  */
-export async function generate(prompt, { json = false, temperature = 0.2, maxTokens = 4096 } = {}) {
+export async function generate(prompt, { json = false, temperature = 0.2, maxTokens = 4096, model: only = null, timeoutMs = 45000 } = {}) {
   const key = cleanEnv(process.env.GEMINI_API_KEY);
   if (!key) return { ok: false, error: 'GEMINI_API_KEY is not set' };
 
@@ -32,9 +33,9 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
   };
 
   let lastErr = 'no model responded';
-  for (const model of MODELS) {
+  for (const model of only ? [only] : MODELS) {
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 45000);
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const res = await fetch(`${BASE}/${model}:generateContent`, {
         method: 'POST',
@@ -53,7 +54,9 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
       // A cut-off answer is worse than none: callers would treat half a JSON
       // object or half a cover letter as complete.
       if (data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') { lastErr = 'answer was cut off (token limit)'; continue; }
-      return { ok: true, text, model };
+      const u = data?.usageMetadata || {};
+      const usage = { in: u.promptTokenCount || 0, out: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) };
+      return { ok: true, text, model, usage };
     } catch (err) {
       clearTimeout(timer);
       lastErr = err.message;

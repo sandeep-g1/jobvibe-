@@ -373,6 +373,16 @@ const TABLES = (pk, json) => `
     updated_at    TEXT NOT NULL
   );
 
+  -- How reputed an employer is (src/lib/premium.js), rated once per company name.
+  CREATE TABLE IF NOT EXISTS company_ratings (
+    name          TEXT PRIMARY KEY,
+    tier          INTEGER,
+    pay           TEXT,
+    staffing      INTEGER,
+    note          TEXT,
+    rated_at      TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS applications (
     id          ${pk},
     user_id     TEXT NOT NULL DEFAULT 'local',

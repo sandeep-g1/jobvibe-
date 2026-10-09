@@ -32,6 +32,7 @@ function quickAuto(job) {
 }
 import { telegramConfigured, sendDigest as sendTelegram, send as sendTelegramText } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
+import { isPremium } from './lib/premium.js';
 
 const log = (m) => console.log(`  match · ${m}`);
 
@@ -48,8 +49,10 @@ export async function pretailor(userId, profile, matches) {
   let n = 0;
   await mapLimit(matches, 2, async (m) => {
     try {
-      const job = await d.one('SELECT j.title, j.company, j.jd_text, j.skills_required FROM job_matches x JOIN jobs j ON j.id = x.job_id WHERE x.id = ?', [m.id]);
-      const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null });
+      const job = await d.one('SELECT j.title, j.company, j.jd_text, j.skills_required, j.salary_raw FROM job_matches x JOIN jobs j ON j.id = x.job_id WHERE x.id = ?', [m.id]);
+      // Reputed, well-paying employers get the extra keyword pass.
+      const prem = await isPremium(job, profile);
+      const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null, push: prem.premium, extraFacts: profile.extraCvText || '' });
       if (!t.ok) return;
       await saveMatchTailoring(m.id, { before: t.ats?.before, after: t.ats?.after, added: t.added, buffer: t.buffer });
       n++;
