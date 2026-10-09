@@ -33,6 +33,7 @@ function quickAuto(job) {
 import { telegramConfigured, sendDigest as sendTelegram, send as sendTelegramText } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
 import { isPremium } from './lib/premium.js';
+import { hardCheck } from './lib/eligibility.js';
 
 const log = (m) => console.log(`  match · ${m}`);
 
@@ -173,6 +174,20 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
     if (r.route === 'auto') { s.auto = true; upgrades++; }
   }
   if (upgrades) log(`${userId}: ${upgrades} aggregator job(s) routed to the employer's own form`);
+
+  // Must-haves: leave out jobs she clearly can't qualify for (degree type, years managing
+  // people, languages…). Only the jobs that could be picked are checked, best first.
+  const notEligible = [];
+  const eligibleSet = new Set();
+  for (const s of living) {
+    if (eligibleSet.size >= limit + MANUAL_EXTRA + 5) break;
+    const v = await hardCheck(s.job, profile, userId).catch(() => null);
+    if (v && !v.eligible) notEligible.push({ s, v }); else eligibleSet.add(s);
+  }
+  for (const { s, v } of notEligible) {
+    log(`${userId}: not eligible · ${s.job.company} · ${s.job.title}: ${v.fails.map((f) => f.requirement).join('; ')}`);
+    living.splice(living.indexOf(s), 1);
+  }
 
   // Auto-apply jobs first (source cap applies), then at most a few strong ones the user applies to.
   const taken = new Map();

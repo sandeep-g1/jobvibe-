@@ -373,6 +373,15 @@ const TABLES = (pk, json) => `
     updated_at    TEXT NOT NULL
   );
 
+  -- Must-have check of a job against one user's CV (src/lib/eligibility.js), done once.
+  CREATE TABLE IF NOT EXISTS eligibility (
+    user_id       TEXT NOT NULL,
+    job_id        INTEGER NOT NULL,
+    verdict       TEXT NOT NULL,
+    checked_at    TEXT NOT NULL,
+    PRIMARY KEY (user_id, job_id)
+  );
+
   -- How reputed an employer is (src/lib/premium.js), rated once per company name.
   CREATE TABLE IF NOT EXISTS company_ratings (
     name          TEXT PRIMARY KEY,
