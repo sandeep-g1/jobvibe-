@@ -8,6 +8,7 @@ import { db } from './db/driver.js';
 import { sendEmail, emailConfigured } from './email.js';
 import { loadProfileAsync } from './lib/profile.js';
 import { emailsSent } from './db.js';
+import { aiCostForDay } from './lib/gemini.js';
 
 export const REPORT_CC = (process.env.REPORT_CC || 'virtualgen360@gmail.com').split(',').map((s) => s.trim()).filter(Boolean);
 const SITE = () => (process.env.SITE_URL || 'https://jobvibe.evergreenskill.com').replace(/\/+$/, '');
@@ -71,7 +72,7 @@ function friendly(r) {
 const appliedByUser = (r) => r.status === 'manual' && /applied (herself|himself|themselves|yourself)/i.test(r.reason || '');
 
 /** Build one user's report. Returns null when there is nothing to report. */
-export function buildAppReport({ name, rows: all, emails, sent = [] }) {
+export function buildAppReport({ name, rows: all, emails, sent = [], cost = null }) {
   if (!all.length && !emails.length && !sent.length) return null;
   // Jobs the user applied to herself count as applied, not as "apply yourself".
   const rows = all.map((r) => (appliedByUser(r) ? { ...r, status: 'submitted', reason: 'You applied yourself.', byUser: true } : r));
@@ -102,10 +103,18 @@ export function buildAppReport({ name, rows: all, emails, sent = [] }) {
   // What the agent wrote to employers on her behalf: replies and follow-ups.
   const out = sent.length ? `<h3 style="margin:22px 0 6px;font-size:15px">📤 Emails sent for you (last 24 hours)</h3><ul style="padding-left:18px;font-size:13px">${sent.map((e) =>
     `<li><b>${e.kind === 'followup' ? 'Follow-up' : 'Reply'}</b> to ${esc(e.company || e.to_addr)}: “${esc(e.subject)}” <span style="color:#667085">${Number(e.auto) ? '(automatic)' : '(you approved)'}</span></li>`).join('')}</ul>` : '';
+  // Last 24 hours at a glance: applied by the agent, sent to her to apply, and what the AI cost.
+  const since = Date.now() - 26 * 3600000;
+  const recent = (st) => rows.filter((r) => st.includes(r.status) && !r.byUser && Date.parse(r.updated_at) > since).length;
+  const tile = (n, label) => `<td style="padding:10px 14px;background:#f5f8fc;border-radius:8px;text-align:center"><div style="font-size:22px;font-weight:700">${n}</div><div style="font-size:12px;color:#475467">${label}</div></td>`;
+  const glance = `<table style="margin:16px 0 4px;border-collapse:separate;border-spacing:8px 0"><tr>
+    ${tile(recent(['submitted', 'unconfirmed']), 'applied by the agent')}${tile(recent(['manual', 'captcha', 'email_code']), 'sent for you to apply')}
+    ${cost ? tile(`$${cost.usd.toFixed(2)}`, `AI cost ${esc(cost.label)} (${cost.calls} calls)`) : ''}</tr></table>
+    <p style="margin:0;font-size:12px;color:#667085">Last 24 hours.</p>`;
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:720px;color:#101828">
     <h2 style="margin:0 0 4px">Your applications · ${esc(today)}</h2>
     <p style="margin:0;color:#475467">Hi ${esc((name || '').split(' ')[0] || 'there')}, here is where every job you approved stands.</p>
-    ${sections}${mail}${out}
+    ${glance}${sections}${mail}${out}
     <p style="margin-top:24px;font-size:12px;color:#667085">Approve jobs in Telegram; the agent applies with a CV tailored to each one. Full list: <a href="${SITE()}/applications">${SITE()}/applications</a></p></div>`;
   return { subject, html };
 }
@@ -118,11 +127,18 @@ export async function sendAppReports({ only = null, dryRun = false } = {}) {
     if (only && u.user_id !== only) continue;
     const profile = await loadProfileAsync(u.user_id);
     const to = (profile.emailTo || [])[0] || u.email;
+    // Yesterday's AI spend (IST day). The report goes out in the morning, so that day is complete.
+    const yesterday = new Date(Date.now() + 5.5 * 3600000 - 86400000).toISOString().slice(0, 10);
+    const c = await aiCostForDay(yesterday).catch(() => null);
+    const cost = c ? { ...c, label: new Date(`${yesterday}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } : null;
     const report = buildAppReport({ name: profile.name, rows: await rowsFor(u.user_id), emails: await emailsFor(u.user_id),
-      sent: await emailsSent(u.user_id, new Date(Date.now() - 26 * 3600000).toISOString()) });
+      sent: await emailsSent(u.user_id, new Date(Date.now() - 26 * 3600000).toISOString()), cost });
     if (!report || !to) { out.skipped++; continue; }
-    if (dryRun) { out.previews.push({ to, cc: REPORT_CC, ...report }); continue; }
-    const r = await sendEmail({ to, cc: REPORT_CC.filter((c) => c.toLowerCase() !== to.toLowerCase()), subject: report.subject, html: report.html });
+    // Admin copy, plus anyone the user added to her report (profile.reportCc).
+    const cc = [...new Set([...REPORT_CC, ...(profile.reportCc || [])].map((x) => String(x).trim().toLowerCase()).filter(Boolean))]
+      .filter((x) => x !== to.toLowerCase());
+    if (dryRun) { out.previews.push({ to, cc, ...report }); continue; }
+    const r = await sendEmail({ to, cc, subject: report.subject, html: report.html });
     if (r.sent) out.sent++; else out.errors.push(`${to}: ${r.reason}`);
   }
   return out;

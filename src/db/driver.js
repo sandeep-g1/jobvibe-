@@ -388,6 +388,16 @@ const TABLES = (pk, json) => `
     done_at       TEXT
   );
 
+  -- AI calls per IST day and model, for the daily cost line in the report (src/lib/gemini.js).
+  CREATE TABLE IF NOT EXISTS ai_usage (
+    day           TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    calls         INTEGER NOT NULL DEFAULT 0,
+    tokens_in     INTEGER NOT NULL DEFAULT 0,
+    tokens_out    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, model)
+  );
+
   -- Must-have check of a job against one user's CV (src/lib/eligibility.js), done once.
   CREATE TABLE IF NOT EXISTS eligibility (
     user_id       TEXT NOT NULL,

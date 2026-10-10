@@ -56,6 +56,7 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
       if (data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') { lastErr = 'answer was cut off (token limit)'; continue; }
       const u = data?.usageMetadata || {};
       const usage = { in: u.promptTokenCount || 0, out: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) };
+      await recordUsage(model, usage);
       return { ok: true, text, model, usage };
     } catch (err) {
       clearTimeout(timer);
@@ -63,6 +64,41 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
     }
   }
   return { ok: false, error: lastErr };
+}
+
+/**
+ * USD per 1M tokens (input, output incl. thinking), from Google's pricing page (Oct 2026).
+ * Flash has an introductory price until 31 Dec 2026, then doubles.
+ */
+export function priceUsd(model, inTok, outTok, at = new Date()) {
+  const pro = /pro/.test(model);
+  const intro = at < new Date('2027-01-01T00:00:00Z');
+  const [pin, pout] = pro ? [2, 12] : intro ? [0.75, 3.75] : [1.5, 7.5];
+  return (inTok * pin + outTok * pout) / 1e6;
+}
+
+/** Add one call to today's (IST) running total, for the daily report. Never fails a call. */
+async function recordUsage(model, usage) {
+  try {
+    const { db } = await import('../db/driver.js');
+    const d = await db();
+    const day = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+    await d.run(`INSERT INTO ai_usage (day, model, calls, tokens_in, tokens_out) VALUES (?,?,1,?,?)
+      ON CONFLICT (day, model) DO UPDATE SET calls = ai_usage.calls + 1,
+        tokens_in = ai_usage.tokens_in + excluded.tokens_in, tokens_out = ai_usage.tokens_out + excluded.tokens_out`,
+      [day, model, usage.in, usage.out]);
+  } catch { /* tracking only */ }
+}
+
+/** AI spend for one IST day: { calls, usd }. */
+export async function aiCostForDay(day) {
+  const { db } = await import('../db/driver.js');
+  const d = await db();
+  const rows = await d.query('SELECT model, calls, tokens_in, tokens_out FROM ai_usage WHERE day = ?', [day]);
+  return {
+    calls: rows.reduce((s, r) => s + Number(r.calls), 0),
+    usd: rows.reduce((s, r) => s + priceUsd(r.model, Number(r.tokens_in), Number(r.tokens_out), new Date(`${day}T12:00:00Z`)), 0),
+  };
 }
 
 /** Pull the first JSON object/array out of a model response. */
