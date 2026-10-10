@@ -47,6 +47,7 @@ const HEADED = argv.includes('--headed');
 // Forms with a CAPTCHA (Keka, Zoho Recruit): fill them in a visible window on this PC and
 // let the user type the CAPTCHA and press Submit. --no-assist where there is no screen.
 const ASSIST = new Set(argv.includes('--no-assist') ? [] : ['keka', 'zohorecruit']);
+const ASSIST_SCREEN = !argv.includes('--no-assist'); // a person can see this PC's screen
 // --skip-ats workday[,…]: leave jobs on these systems queued for another worker
 // (e.g. account-based Workday, run only from a worker its owner starts).
 const SKIP_ATS = new Set(argv.includes('--skip-ats') ? String(argv[argv.indexOf('--skip-ats') + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -105,12 +106,17 @@ Added for this job, based on related experience (brush up before an interview): 
   return ats + added;
 }
 
-/** A CAPTCHA form: filled in a visible window here; she types the CAPTCHA and submits. */
-async function applyAssisted({ job, profile, cv, cvName, cvText, label }) {
+/**
+ * Filled in a visible window here, and she finishes it: types a CAPTCHA, or (handOver) completes
+ * the fields the agent couldn't answer or fill. Then she presses Submit and the agent confirms.
+ */
+async function applyAssisted({ job, profile, cv, cvName, cvText, label, handOver = false }) {
   const visible = await chromium.launch({ headless: false });
   try {
-    return await applyOne({ browser: visible, visibleBrowser: visible, job, profile, cv, cvName, cvText, dryRun: DRY,
-      onYourTurn: () => notify(profile, `🖐 <b>Your turn:</b> ${label} is filled in the browser window on the PC. Type the CAPTCHA there and press <b>Submit</b>; I'll confirm when it goes through. (I'll wait 15 minutes.)`) });
+    return await applyOne({ browser: visible, visibleBrowser: visible, job, profile, cv, cvName, cvText, dryRun: DRY, handOver,
+      onYourTurn: (gaps = []) => notify(profile, gaps.length
+        ? `🖐 <b>Your turn:</b> ${label} is filled in the browser window on the PC, except:\n${gaps.slice(0, 8).map((g) => `• ${h(String(g).slice(0, 120))}`).join('\n')}\nFill ${gaps.length === 1 ? 'that' : 'those'} there and press <b>Submit</b>; I'll confirm when it goes through. (I'll wait 15 minutes.)`
+        : `🖐 <b>Your turn:</b> ${label} is filled in the browser window on the PC. Type the CAPTCHA there and press <b>Submit</b>; I'll confirm when it goes through. (I'll wait 15 minutes.)`) });
   } finally {
     await visible.close().catch(() => {});
   }
@@ -246,10 +252,17 @@ async function processItem(item, browser) {
   log(`${item.user_id}: applying to ${job.title} @ ${job.company} (${ats || 'generic'})${DRY ? ' [dry run]' : ''}`);
   // A form that emails a security code after Submit: read it from her connected job-hunt inbox.
   const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
-  const r = ats === 'workday'
+  let r = ats === 'workday'
     ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, ...workdayAccount(item.user_id, profile, job.url) })
     : assisted ? await applyAssisted({ job, profile, cv, cvName, cvText, label })
       : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
+  // A question it can't answer, or a field it can't fill: open the form on the PC's screen,
+  // fill the rest, and let her complete those fields and submit (profile.assistGaps, default on).
+  const stuck = r.status === 'needs_user' || (r.status === 'failed' && /could not fill|required fields left empty/.test(r.reason || ''));
+  if (stuck && ats !== 'workday' && !DRY && ASSIST_SCREEN && profile.assistGaps !== false) {
+    log(`${item.user_id}: ${label.replace(/<[^>]+>/g, '')}: handing the unfilled fields to her on screen`);
+    r = await applyAssisted({ job, profile, cv, cvName, cvText, label, handOver: true });
+  }
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
 
   if (r.status === 'manual') {

@@ -16,4 +16,4 @@ rem Give Wi-Fi a minute to connect after the PC starts.
 echo Starting JobVibe worker in 60 seconds...
 timeout /t 60 /nobreak >nul
 
-start "JobVibe worker" /min powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0worker\always-on.ps1" -Live -SkipAts workday
+start "JobVibe worker" /min powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0worker\always-on.ps1" -Live

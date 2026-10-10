@@ -136,7 +136,7 @@ async function openForm(page, url) {
  *        fills the form there, the user types the CAPTCHA and presses Submit, the agent watches for the confirmation
  * @param {Function} [o.onYourTurn]  called once the form is filled and waiting for the user
  */
-export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true, getEmailCode = null, visibleBrowser = null, onYourTurn = null }) {
+export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryRun = true, getEmailCode = null, visibleBrowser = null, onYourTurn = null, handOver = false }) {
   const ats = atsOf(job.url);
   const url = formUrl(job.url, ats);
   const dir = join(tmpdir(), 'jobvibe-apply', safe(`${job.company}_${job.title}`));
@@ -165,7 +165,9 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       .some((el) => el.getClientRects().length && /captcha|image text|text in the image|security text/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute('aria-label') || ''}`)))
       .catch(() => false);
     if (typedCaptcha && !visibleBrowser) return { status: 'captcha', reason: 'the application form has a CAPTCHA', url };
-    const humanSubmits = typedCaptcha && !!visibleBrowser; // assisted: she types the CAPTCHA and submits
+    // Fields the agent can't answer or fill, left for the person when the form is on her screen.
+    const gaps = [];
+    const canHandOver = handOver && !!visibleBrowser;
 
     // 1. Decide every answer before touching the page.
     const plan = [];
@@ -204,12 +206,16 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
     }
     // Not eligible (unless the user said apply anyway): stop before asking or filling anything.
     if (noGo.length && !job.override) return { status: 'ineligible', reasons: noGo, url };
-    if (ask.length) return { status: 'needs_user', questions: ask, url };
+    if (ask.length && !canHandOver) return { status: 'needs_user', questions: ask, url };
+    gaps.push(...ask.map((a) => a.label));
 
     // 2. Fill.
     for (const step of plan) {
       const okFill = await fillField(page, step.f, step.value).catch((e) => { log.push(`${step.f.label}: ${e.message.split('\n')[0]}`); return false; });
-      if (!okFill && step.f.required) return { status: 'failed', reason: `could not fill "${step.f.label}"`, url, log };
+      if (!okFill && step.f.required) {
+        if (!canHandOver) return { status: 'failed', reason: `could not fill "${step.f.label}"`, url, log };
+        gaps.push(step.f.label);
+      }
     }
     await page.waitForTimeout(800);
 
@@ -242,7 +248,10 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
         return !String(el.value || '').trim();
       })
       .map((el) => el.name || el.id || el.getAttribute('aria-label') || 'unnamed field'));
-    if (empty.length) return { status: 'failed', reason: `required fields left empty: ${empty.join(', ')}`, url, log };
+    if (empty.length && !canHandOver) return { status: 'failed', reason: `required fields left empty: ${empty.join(', ')}`, url, log };
+    if (empty.length) gaps.push(...empty.filter((e) => !gaps.some((g) => g.toLowerCase().includes(String(e).toLowerCase()))));
+    // assisted: she types the CAPTCHA, or completes the fields the agent couldn't, and submits
+    const humanSubmits = (typedCaptcha && !!visibleBrowser) || (canHandOver && gaps.length > 0);
 
     const screenshot = await page.screenshot({ fullPage: true });
     const filled = plan.map((s) => ({ label: s.f.label, value: s.f.type === 'file' ? `[file] ${s.source}` : String(s.value).slice(0, 200), source: s.source }));
@@ -253,7 +262,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
       const startUrl = page.url();
       const seen = new Set((await page.evaluate(() => document.body.innerText).catch(() => '')).split('\n').map((x) => x.trim()));
       await page.bringToFront().catch(() => {});
-      if (onYourTurn) await onYourTurn();
+      if (onYourTurn) await onYourTurn(gaps);
       clicked = true; // from here on the person may have submitted: never auto-retry
       const until = Date.now() + 15 * 60000;
       while (Date.now() < until) {
@@ -265,7 +274,7 @@ export async function applyOne({ browser, job, profile, cv, cvName, cvText, dryR
           return { status: 'submitted', url, filled, evidence: { url: page.url(), text: (line || '').slice(0, 300), at: new Date().toISOString(), assisted: true }, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
         }
       }
-      return { status: 'captcha', reason: 'not submitted within 15 minutes (CAPTCHA left for you)', url, filled, clicked: false };
+      return { status: 'captcha', reason: gaps.length ? `not submitted within 15 minutes (left for you: ${gaps.join(', ').slice(0, 200)})` : 'not submitted within 15 minutes (CAPTCHA left for you)', url, filled, clicked: false };
     }
 
     // 4. Submit and read the outcome.
