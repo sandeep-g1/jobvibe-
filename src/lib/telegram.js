@@ -264,8 +264,24 @@ async function onMessage(msg) {
   const p = owner.data;
 
   // A reply to one of the agent's questions: save it to the answer bank.
-  const replyTo = msg.reply_to_message?.message_id;
-  const pending = (p.telegram.pending || []).find((x) => x.id === replyTo);
+  let replyTo = msg.reply_to_message?.message_id;
+  const open = p.telegram.pending || [];
+  // A plain message (not a reply) while questions are open: with one question it's the answer;
+  // with several, ask them again so each can be answered with a reply. Never drop it silently.
+  if (!replyTo && text && !text.startsWith('/') && open.length) {
+    if (open.length === 1) replyTo = open[0].id;
+    else {
+      await send(chatId, `I have ${open.length} open questions and can't tell which one that answers. I'll send them again: <b>swipe left on a question</b> (or tap Reply) and type the answer.`);
+      const again = [];
+      for (const x of open) {
+        const r = await send(chatId, `❓ ${h(x.q)}`, { forceReply: true });
+        again.push(r?.ok ? { ...x, id: r.result.message_id } : x);
+      }
+      await save(owner.userId, { ...p, telegram: { ...p.telegram, pending: again } });
+      return;
+    }
+  }
+  const pending = open.find((x) => x.id === replyTo);
   // Questionnaire replies (address, years per skill) go to their own fields.
   if (pending?.field && text) {
     const answers = { ...(p.answers || {}) };
