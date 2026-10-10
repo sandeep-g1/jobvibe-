@@ -5,7 +5,7 @@ rem Safe to run twice: if the worker is already running, it does nothing.
 
 cd /d "%~dp0"
 
-powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.CommandLine -like '*always-on.ps1*' }) { exit 1 } else { exit 0 }"
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*always-on.ps1*' }) { exit 1 } else { exit 0 }"
 if errorlevel 1 (
   echo JobVibe worker is already running.
   timeout /t 5 >nul
