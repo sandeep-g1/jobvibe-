@@ -23,12 +23,17 @@ import { aiRerank } from './lib/rerank.js';
 import { resolveApplyRoute, AUTO_ATS, atsOfUrl } from './lib/apply-route.js';
 
 // How many strong jobs the user must apply to themselves may join the auto-apply ones.
-const MANUAL_EXTRA = 3;
+const MANUAL_EXTRA = 8; // strong jobs she applies to herself (Workday, portals); was 3 before Workday went to her
 
 /** Can the agent apply on its own? (job's own system, or a route already resolved) — no network. */
+// Workday sites refuse automated accounts, so the worker hands Workday jobs to her: for picking
+// they count as jobs she applies to, not the agent.
+const isWorkday = (job, route = {}) => job.source === 'workday' || route.ats === 'workday' || atsOfUrl(job.final_url || job.apply_url) === 'workday';
 function quickAuto(job) {
+  let route = {}; try { route = JSON.parse(job.apply_route || '{}'); } catch { /* none */ }
+  if (isWorkday(job, route)) return false;
   if (AUTO_ATS.includes(job.source) || AUTO_ATS.includes(atsOfUrl(job.final_url || job.apply_url))) return true;
-  try { return JSON.parse(job.apply_route || '{}').route === 'auto'; } catch { return false; }
+  return route.route === 'auto';
 }
 import { telegramConfigured, sendDigest as sendTelegram, send as sendTelegramText } from './lib/telegram.js';
 import { extractText } from './lib/resume.js';
@@ -171,7 +176,7 @@ export async function runMatch(userId, { email = true, profile: pre } = {}) {
   let upgrades = 0;
   for (const s of living.filter((x) => !x.auto && x.result.score >= 70).slice(0, 12)) {
     const r = await resolveApplyRoute(s.job);
-    if (r.route === 'auto') { s.auto = true; upgrades++; }
+    if (r.route === 'auto' && !isWorkday(s.job, r)) { s.auto = true; upgrades++; }
   }
   if (upgrades) log(`${userId}: ${upgrades} aggregator job(s) routed to the employer's own form`);
 
