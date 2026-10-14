@@ -194,6 +194,11 @@ async function processItem(item, browser) {
       manualWhy = route.reason;
     }
   }
+  // Workday sites refuse automated sign-ups (every account attempt on 11 Oct 2026 failed), so
+  // these go to her with the link and tailored CV. profile.workdayAuto = true tries again.
+  if (!manualWhy && ats === 'workday' && profile.workdayAuto !== true) {
+    manualWhy = "it's on Workday, which needs a candidate account that only you can create";
+  }
 
   // One application per employer posting, even when two sources listed it.
   if (!manualWhy) {
