@@ -36,6 +36,7 @@ import { resolveApplyRoute } from '../src/lib/apply-route.js';
 import { checkInbox, sendApprovedReplies } from './inbox.js';
 import { planFollowups, sendFollowups } from './followups.js';
 import { isPremium } from '../src/lib/premium.js';
+import { buildDetailsSheet } from '../src/lib/details-sheet.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -370,6 +371,19 @@ async function tailorTick() {
   }
 }
 
+/* ---------------- application details sheet ---------------- */
+// reports/application-details-<Name>.md: her details for copying into forms or an autofill
+// extension. Rewritten when anything in it changes (new answers appear automatically).
+async function refreshDetailsSheet(userId) {
+  const profile = await loadProfileAsync(userId);
+  if (!profile.name) return;
+  const file = join(dirname(fileURLToPath(import.meta.url)), '..', 'reports', `application-details-${safe(profile.name.split(' ')[0])}.md`);
+  const next = buildDetailsSheet(profile);
+  const body = (t) => t.split('\n').filter((l) => !l.startsWith('_Updated automatically')).join('\n');
+  const prev = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (body(prev) !== body(next)) { writeFileSync(file, next); log(`${userId}: application details sheet updated`); }
+}
+
 /* ---------------- inbox ---------------- */
 const INBOX_EVERY_MS = 10 * 60 * 1000;
 const lastInbox = new Map();
@@ -383,6 +397,7 @@ async function inboxTick() {
     if (!ONCE && Date.now() - (lastInbox.get(p.userId) || 0) < INBOX_EVERY_MS) continue;
     lastInbox.set(p.userId, Date.now());
     try { log(`${p.userId}: inbox ${await checkInbox(p.userId)}`); } catch (err) { log(`${p.userId}: inbox failed ${err.message}`); }
+    try { await refreshDetailsSheet(p.userId); } catch (err) { log(`${p.userId}: details sheet failed ${err.message}`); }
     try { const n = await planFollowups(p.userId); if (n) log(`${p.userId}: ${n} follow-up(s) drafted`); } catch (err) { log(`${p.userId}: follow-ups failed ${err.message}`); }
   }
 }
