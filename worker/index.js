@@ -96,6 +96,11 @@ const notify = async (profile, html) => {
 const notifyFile = async (profile, file) => {
   if (telegramConfigured() && profile.telegram?.chatId) await sendFile(profile.telegram.chatId, file);
 };
+/** The job description as a text file, sent with every job handed to her to apply herself. */
+const jdFile = (job) => ({
+  kind: 'document', filename: `JD_${safe(job.company)}_${safe(job.title).slice(0, 30)}.txt`, caption: `Job description: ${h(job.title)} at ${h(job.company)}`,
+  buffer: Buffer.from(`${job.title}\n${job.company}${job.city ? ` · ${job.city}` : ''}\nApply: ${job.url}\n\n${String(job.jd_text || 'The description could not be read; open the link.').trim()}\n`, 'utf8'),
+});
 
 /** "ATS keywords 41% → 78%. Added for this job (brush up before an interview): Confluence (from your Jira)…" */
 function tailorNote(t) {
@@ -252,6 +257,7 @@ async function processItem(item, browser) {
   if (manualWhy) {
     await notify(profile, `✋ Please apply to ${label} yourself: ${h(manualWhy)}.\n<a href="${h(job.url)}">Open the job</a>. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
     await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
+    await notifyFile(profile, jdFile(job));
     return save('manual', manualWhy);
   }
 
@@ -322,6 +328,7 @@ async function processItem(item, browser) {
   if (r.status === 'captcha') {
     await notify(profile, `🧩 Almost done: ${label} asked for a human check (CAPTCHA), which only you can do.\n<a href="${h(job.url)}">Open the application</a> and submit. Your ${tailored ? 'tailored ' : ''}CV is attached.`);
     await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)}` });
+    await notifyFile(profile, jdFile(job));
     return save('captcha', 'human check required', { filled });
   }
   if (r.status === 'unconfirmed') {
@@ -338,7 +345,9 @@ async function processItem(item, browser) {
     try { writeFileSync(shot, r.screenshot); log(`${item.user_id}: failure screenshot ${shot}`); } catch { /* best effort */ }
   }
   if (attempts < 2 && !r.noRetry) return save('queued', r.reason, { lastError: r.reason }, attempts);
-  await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself.`);
+  await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself. Your CV and the job description are attached.`);
+  await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
+  await notifyFile(profile, jdFile(job));
   return save('failed', r.reason, { filled }, attempts);
 }
 
