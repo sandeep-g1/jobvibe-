@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import {
   initDB, enqueueApproved, nextQueued, updateQueueItem, submittedToday, defaultResume, markApplied, allProfiles, saveQueueCv,
   claimDestination, saveProfileRow, matchTailoring, recentApplicationAt,
-  claimTailorRequest, finishTailorRequest, jobByFingerprint,
+  claimTailorRequest, finishTailorRequest, jobByFingerprint, saveMatchTailoring,
 } from '../src/db.js';
 import { db } from '../src/db/driver.js';
 import { loadSecretsIntoEnv, encrypt, decrypt } from '../src/lib/secrets.js';
@@ -257,7 +257,11 @@ async function processItem(item, browser) {
   } else if (ext === 'docx') {
     const prem = await isPremium(job, profile).catch(() => ({ premium: false }));
     const t = await tailorResume(original, job, profile.skillBank || [], { stretch: profile.stretchSkills !== false, yearsExp: profile.totalExpYears ?? null, push: prem.premium, extraFacts: profile.extraCvText || '' });
-    if (t.ok) { cv = t.buffer; tailored = true; tailoring = { ats: t.ats ? { before: t.ats.before, after: t.ats.after } : null, added: t.added || [] }; }
+    if (t.ok) {
+      cv = t.buffer; tailored = true; tailoring = { ats: t.ats ? { before: t.ats.before, after: t.ats.after } : null, added: t.added || [] };
+      // Keep it on the match, so a retry of this job reuses it instead of tailoring again (minutes + AI cost).
+      await saveMatchTailoring(item.match_id, { before: t.ats?.before, after: t.ats?.after, added: t.added, buffer: t.buffer }).catch(() => {});
+    }
   }
   // What the employer receives: "<Name>_CV.docx", with her name in the file's properties.
   if (ext === 'docx') cv = await ownDocx(cv, profile.name);
