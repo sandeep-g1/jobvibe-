@@ -530,7 +530,7 @@ export function answerQuestion(q, profile, ctx = {}) {
       || opts.find((x) => /job board|online|linkedin/i.test(x)) || opts.find((x) => /^other/i.test(x));
     return o ? { answer: o, source: 'default' } : { needsHuman: true, reason: 'referral source options' };
   }
-  if (/(previously|ever) (worked|been employed|employed)|former employee|worked (for|at) .{0,40} before|(been|currently,? or have you been) employed (by|at|with)|employed by .{0,60}(past|previous|before|within)/.test(t)) {
+  if (/(previously|ever) (worked|been employed|employed)|(previously|ever) applied (or|and|\/) ?(worked|been employed)|former employee|worked (for|at) .{0,40} before|(been|currently,? or have you been) employed (by|at|with)|employed by .{0,60}(past|previous|before|within)/.test(t)) {
     const co = lc(ctx.company);
     const worked = co && co.length > 2 && lc(ctx.cvText || '').includes(co);
     return worked ? { needsHuman: true, reason: `your CV mentions ${ctx.company}` } : yesno(false, 'CV has no record of this employer');
