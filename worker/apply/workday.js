@@ -567,7 +567,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
     // The wizard: answer what's empty on each page, then Next, until Review.
     const asked = [];
     let reloads = 0;
-    for (let step = 0; step < 14; step++) {
+    for (let step = 0; step < 24; step++) { // room for pages, Next retries and up to 6 refreshes
       await settle(page);
       if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check', url, filled };
       const stepName = (await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
@@ -657,10 +657,10 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       // so do what it says, at most twice, and carry on from the same step.
       // Same for a blank page (only Workday's header and footer, no form): reload.
       const blank = !(await page.locator('[data-automation-id="applyFlowPage"], [data-automation-id="progressBar"]').count());
-      if (!(await nextBtn.count()) && (blank || /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page))) && reloads < 2) {
+      if (!(await nextBtn.count()) && (blank || /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page))) && reloads < 6) { // her rule: always refresh and retry on this error
         reloads++;
         log.push(`Workday asked for a refresh on "${stepName}" (reload ${reloads})`);
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(4000 + reloads * 2000); // a little longer each time
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
         await page.waitForTimeout(5000);
         continue;
