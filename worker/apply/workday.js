@@ -183,20 +183,49 @@ async function enter(page, { account, profile, createAccount, getVerifyLink, get
   if (!(await page.locator(`${ID('verifyPassword')}:visible`).count())) await press(page, 'createAccountLink');
   await page.locator(ID('verifyPassword')).first().waitFor({ timeout: 15000 });
   const acc = { email, password: newPassword() };
-  await page.locator(ID('email')).first().fill(acc.email);
-  await page.locator(ID('password')).first().fill(acc.password);
-  await page.locator(ID('verifyPassword')).first().fill(acc.password);
+  // Typed key by key, like a person: Workday's form can ignore values set in one go
+  // (fill), and then "Create Account" does nothing at all (seen on Nasdaq, 17 Oct 2026).
+  const typeInto = async (id, value) => {
+    const el = page.locator(ID(id)).first();
+    await el.click();
+    await el.fill('');
+    await el.pressSequentially(value, { delay: 40 });
+    await el.press('Tab');
+  };
+  await typeInto('email', acc.email);
+  await typeInto('password', acc.password);
+  await typeInto('verifyPassword', acc.password);
+  // The consent box: click it where a person would, so the page registers it.
   const box = page.locator(ID('createAccountCheckbox')).first();
-  if (await box.count() && !(await box.isChecked().catch(() => false))) await box.check({ force: true });
+  if (await box.count() && !(await box.isChecked().catch(() => false))) {
+    const b = await box.boundingBox().catch(() => null);
+    if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+    if (!(await box.isChecked().catch(() => false))) await box.check({ force: true });
+  }
   const since = new Date();
   // What the site answers to "Create Account" (status codes only), so a silent refusal
   // (e.g. a bot check dropping the request) shows up as such instead of as a mystery.
   const net = [];
   const onResp = (r) => { const t = r.request().resourceType(); if (t === 'xhr' || t === 'fetch') net.push(`${r.status()} ${r.request().method()} ${new URL(r.url()).pathname.slice(0, 50)}`); };
   page.on('response', onResp);
-  await press(page, 'createAccountSubmitButton');
-  await settle(page);
-  await page.waitForTimeout(2500);
+  // Three ways to press it, stopping as soon as the site reacts: the button's centre, Enter in
+  // the last field, and Workday's transparent click_filter overlay itself.
+  const tries = [
+    ['button', () => press(page, 'createAccountSubmitButton')],
+    ['enter', () => page.locator(ID('verifyPassword')).first().press('Enter')],
+    ['overlay', async () => {
+      const f = page.locator(`${ID('createAccountSubmitButton')} ~ [data-automation-id="click_filter"], [data-automation-id="click_filter"][aria-label*="Create Account" i]`).first();
+      if (await f.count()) await f.click({ force: true }); else await press(page, 'createAccountSubmitButton');
+    }],
+  ];
+  for (const [how, go] of tries) {
+    const before = net.length;
+    await go().catch(() => {});
+    await settle(page);
+    await page.waitForTimeout(2500);
+    if (net.length > before || !(await page.locator(`${ID('verifyPassword')}:visible`).count())) break;
+    console.log(`  Workday create account: "${how}" got no reaction`);
+  }
   page.off('response', onResp);
 
   const errs = await visibleErrors(page);
