@@ -334,14 +334,35 @@ const readFields = (page) => page.evaluate(() => {
   return out;
 });
 
+/**
+ * The options of the list this dropdown button opened. Other lists can be on the page at the
+ * same time (the Skills box's "… (Suggested)" list), so read the button's own list: the one it
+ * names in aria-controls, else the newest visible list that isn't a skills suggestion list.
+ */
+async function ownOptions(page, btn) {
+  const id = await btn.getAttribute('aria-controls').catch(() => null);
+  if (id) {
+    const own = page.locator(`[id="${id}"] [role="option"]`);
+    await own.first().waitFor({ timeout: 4000 }).catch(() => {});
+    if (await own.count()) return own;
+  }
+  await page.locator('[role="listbox"]:visible [role="option"]').first().waitFor({ timeout: 4000 }).catch(() => {});
+  const lists = page.locator('[role="listbox"]:visible');
+  for (let i = (await lists.count()) - 1; i >= 0; i--) {
+    const opts = lists.nth(i).locator('[role="option"]');
+    const texts = await opts.allInnerTexts().catch(() => []);
+    if (texts.length && !texts.every((t) => /\(suggested\)/i.test(t))) return opts;
+  }
+  return page.locator('[role="listbox"]:visible').last().locator('[role="option"]');
+}
+
 /** Open a Workday dropdown, read its options, close it. */
 async function dropdownOptions(page, f) {
   const btn = page.locator(f.sel).locator('button[aria-haspopup="listbox"]').first();
   await btn.click().catch(() => {});
-  await page.locator('[role="listbox"] [role="option"]').first().waitFor({ timeout: 4000 }).catch(() => {});
-  const opts = await page.$$eval('[role="listbox"] [role="option"]', (os) => os.map((o) => o.innerText.trim()).filter(Boolean)).catch(() => []);
+  const opts = (await (await ownOptions(page, btn)).allInnerTexts().catch(() => [])).map((o) => o.trim()).filter(Boolean);
   await page.keyboard.press('Escape').catch(() => {});
-  return opts.filter((o) => !/^select one$/i.test(o));
+  return opts.filter((o) => !/^select one$/i.test(o) && !/\(suggested\)/i.test(o));
 }
 
 /**
@@ -391,8 +412,9 @@ async function fill(page, f, value, files) {
       return true;
     }
     case 'dropdown': {
-      await box.locator('button[aria-haspopup="listbox"]').first().click();
-      const all = page.locator('[role="listbox"] [role="option"]');
+      const btn = box.locator('button[aria-haspopup="listbox"]').first();
+      await btn.click();
+      const all = await ownOptions(page, btn); // this dropdown's own list, never the skills suggestions
       await all.first().waitFor({ timeout: 5000 });
       // Exact text first: "No" must not land on "None" or "Not applicable".
       const exact = all.filter({ hasText: new RegExp(`^\\s*${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }).first();
