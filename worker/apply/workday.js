@@ -526,7 +526,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
           if (await fill(page, f, d.text, files)) filled.push({ label: f.label, value: d.text.slice(0, 200), source: 'AI draft' });
           continue;
         }
-        if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason, options: f.options || [] }); continue; }
+        if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason, options: f.options || [], debug: `${f.type}; options [${(f.options || []).slice(0, 8).join(' / ')}]; engine: ${r.reason}` }); continue; }
         if (r.answer === '' || r.answer == null) continue;
         if (blocksEligibility({ label: f.label, type: f.type === 'checkbox' ? 'checkbox' : 'radio', options: f.options, required: f.required }, r)) {
           noGo.push({ label: f.label, answer: r.answer === false ? 'No' : String(r.answer) });
@@ -535,10 +535,15 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         const value = f.options?.length && typeof r.answer !== 'boolean' ? (pickOption(r.answer, f.options) || r.answer) : r.answer;
         const ok = await fill(page, f, value, files).catch((e) => { log.push(`${f.label}: ${e.message.split('\n')[0]}`); return false; });
         if (ok) filled.push({ label: f.label, value: String(value).slice(0, 200), source: r.source });
-        else if (f.required) ask.push({ label: f.label, reason: `couldn't set "${String(value).slice(0, 40)}"`, options: f.options || [] });
+        else if (f.required) ask.push({ label: f.label, reason: `couldn't set "${String(value).slice(0, 40)}"`, options: f.options || [], debug: `${f.type}; options [${(f.options || []).slice(0, 8).join(' / ')}]; tried "${String(value).slice(0, 40)}"` });
       }
       if (noGo.length && !job.override) return { status: 'ineligible', reasons: noGo, url };
-      if (ask.length) return { status: 'needs_user', questions: [...asked, ...ask], url };
+      if (ask.length) {
+        // What it saw, for the next fix: each field's type, options and why it stopped, plus a picture.
+        return { status: 'needs_user', questions: [...asked, ...ask], url,
+          log: [...log, ...ask.map((a) => `ASK "${a.label.slice(0, 60)}": ${a.debug || a.reason}`)],
+          screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
+      }
 
       const before = stepName;
       if (!(await nextBtn.count())) {

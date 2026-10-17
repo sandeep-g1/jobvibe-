@@ -317,6 +317,9 @@ async function processItem(item, browser) {
     return save('ineligible', r.reasons.map((x) => `${x.label}: ${x.answer}`).join(' | '));
   }
   if (r.status === 'needs_user') {
+    // Keep what the form showed (log + screenshot) so a stuck question can be diagnosed.
+    if (r.log?.length) log(`${item.user_id}: ${label.replace(/<[^>]+>/g, '')}: ${r.log.slice(-6).join(' || ')}`);
+    if (r.screenshot) { try { writeFileSync(join(tmpdir(), 'jobvibe-apply', `needs-${item.id}.png`), r.screenshot); } catch { /* best effort */ } }
     // Ask whatever isn't already open in her chat. (These questions are unanswered by
     // definition: the form engine just asked for them.) A question whose answer was
     // removed, or whose message was lost, gets asked again.
@@ -325,7 +328,7 @@ async function processItem(item, browser) {
       if ((profile.telegram?.pending || []).some((x) => x.q === q.label)) continue;
       await askUser(item.user_id, profile, q.label, { context: `${job.title} at ${job.company}`, options: q.options });
     }
-    return save('needs_user', r.questions.map((q) => q.label).join(' | '));
+    return save('needs_user', r.questions.map((q) => q.label).join(' | '), r.log?.length ? { formLog: r.log.slice(-12) } : undefined);
   }
   if (r.status === 'dry_run') {
     await notify(profile, `🧪 Dry run: filled the application for ${label} (${filled.length} answers). Not submitted.`);
