@@ -521,6 +521,28 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (o) return { answer: o, source: 'default: email' };
   }
   if (/(18|eighteen) years|legal age|age of majority/.test(t)) return yesno(true, 'adult');
+  // US status (citizen, national, green card, asylee, refugee): from her US work status.
+  if (/u\.?\s?s\.? (citizen|national)|green card|lawful permanent resident|asylee|refugee/.test(t)) {
+    const us = a.workAuth?.US?.status;
+    return yesno(us === 'citizen' || us === 'permanent', 'your US status');
+  }
+  // Securities licences / registrations (NISM in India, FINRA series in the US): her standing answer.
+  if (/securities licen[cs]es?|securities registrations?|series (7|63|65|66)\b|finra registration/.test(t)) {
+    const v = a.declarations?.securitiesLicense;
+    if (v === 'yes' || v === 'no') return yesno(v === 'yes', v === 'yes' ? 'your answer: NISM certifications' : 'your answer');
+    return { needsHuman: true, reason: 'securities licences or registrations' };
+  }
+  // Disciplinary actions or sanctions by securities regulators (FINRA, SEC, SEBI, exchanges).
+  if (/(disciplinary|sanction).{0,160}(finra|\bsec\b|securities|exchange|sebi|regulator)/.test(t)) {
+    if (a.declarations?.regulatorySanctions === 'no') return yesno(false, 'your answer: no regulatory sanctions');
+    return { needsHuman: true, reason: 'regulatory disciplinary actions' };
+  }
+  // Working from the office N days a week: her saved answer about working from office.
+  if (/(report|come|work) (to|from|in|at) (the )?office|days? (a|per) week (in|at|from) (the )?office|in-office|on-?site/.test(t)) {
+    const wfo = (a.custom || []).find((c) => /(work|report).{0,20}office/i.test(c.q));
+    if (wfo) return yesno(/^y/i.test(String(wfo.a).trim()), 'your answer: working from office');
+    return { needsHuman: true, reason: 'working from the office' };
+  }
   if (/how did you (hear|find|learn|get to know|come to know|come across)|source of (application|referral)|where did you (hear|see|find)/.test(t)) {
     if (!isChoice) return { answer: 'Company careers website', source: 'default' };
     // LinkedIn first where offered: she finds jobs through LinkedIn and its alerts, and it is a
