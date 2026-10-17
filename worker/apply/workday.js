@@ -344,13 +344,40 @@ async function dropdownOptions(page, f) {
   return opts.filter((o) => !/^select one$/i.test(o));
 }
 
+/**
+ * The choices in the picker popup that is open now, as clickable handles. Workday also uses
+ * promptOption for the items already chosen in other fields (the phone code "India (+91)"),
+ * so anything inside a selected-item pill or a field's own input box is left out.
+ */
+async function popupOptions(page) {
+  const all = await page.$$('[data-automation-id="promptOption"]');
+  const out = [];
+  for (const h of all) {
+    const info = await h.evaluate((o) => ({
+      text: o.innerText.trim(),
+      ok: !!o.getClientRects().length && !o.closest('[data-automation-id="selectedItem"], [data-automation-id="multiselectInputContainer"], [data-automation-id="formField"] [data-automation-id="selectedItemList"]'),
+    })).catch(() => ({ ok: false }));
+    if (info.ok && info.text) out.push({ text: info.text, handle: h });
+  }
+  return out;
+}
+
 /** Open a multi-select picker and read its top-level choices. */
 async function multiOptions(page, f) {
   await page.locator(f.sel).locator('input').first().click().catch(() => {});
-  await page.locator('[data-automation-id="promptOption"]').first().waitFor({ timeout: 4000 }).catch(() => {});
-  const opts = await page.$$eval('[data-automation-id="promptOption"]', (os) => os.filter((o) => o.getClientRects().length).map((o) => o.innerText.trim()).filter(Boolean)).catch(() => []);
+  await page.waitForTimeout(1200);
+  const opts = (await popupOptions(page)).map((o) => o.text);
   await page.keyboard.press('Escape').catch(() => {});
   return [...new Set(opts)].slice(0, 100);
+}
+
+/** Workday's tick boxes are custom: click the label, else the box's spot on screen. */
+async function clickLikeAPerson(page, box, input) {
+  const id = await input.getAttribute('id').catch(() => null);
+  const label = id ? box.locator(`label[for="${id}"]`).first() : null;
+  if (label && await label.count()) { await label.click().catch(() => {}); return; }
+  const b = await input.boundingBox().catch(() => null);
+  if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
 }
 
 /** Write one answer. Returns true if the page took it. */
@@ -383,23 +410,23 @@ async function fill(page, f, value, files) {
       const selected = async () => !!(await box.locator('[data-automation-id="selectedItem"]').count());
       await input.click();
       for (let depth = 0; depth < 3; depth++) {
-        await page.locator('[data-automation-id="promptOption"]').first().waitFor({ timeout: 4000 }).catch(() => {});
-        const opts = await page.$$eval('[data-automation-id="promptOption"]', (os) => os.filter((o) => o.getClientRects().length).map((o) => o.innerText.trim()).filter(Boolean)).catch(() => []);
+        await page.waitForTimeout(1200);
+        const opts = await popupOptions(page); // only the open popup, never other fields' chosen items
         if (!opts.length) break;
         let choice = null;
-        for (const p of prefs) { choice = opts.find((o) => o.toLowerCase() === p) || opts.find((o) => o.toLowerCase().includes(p)); if (choice) break; }
+        for (const p of prefs) { choice = opts.find((o) => o.text.toLowerCase() === p) || opts.find((o) => o.text.toLowerCase().includes(p)); if (choice) break; }
         if (!choice) break;
-        await page.locator('[data-automation-id="promptOption"]').filter({ hasText: choice }).first().click();
+        await choice.handle.click();
         await page.waitForTimeout(900);
         if (await selected()) break;
       }
       if (!(await selected())) {
-        // Fallback: search by text, as before.
+        // Fallback: search by text in the picker, then take the matching popup option.
         await input.fill(String(value));
         await input.press('Enter');
-        await page.waitForTimeout(1200);
-        const opt = page.locator('[data-automation-id="promptOption"], [role="option"]').filter({ hasText: String(value) }).first();
-        if (await opt.count()) { await opt.click(); await page.waitForTimeout(600); }
+        await page.waitForTimeout(1500);
+        const opt = (await popupOptions(page)).find((o) => o.text.toLowerCase().includes(String(value).toLowerCase()));
+        if (opt) { await opt.handle.click(); await page.waitForTimeout(600); }
       }
       await page.keyboard.press('Escape').catch(() => {});
       return selected();
@@ -407,18 +434,33 @@ async function fill(page, f, value, files) {
     case 'radio': {
       const idx = f.options.findIndex((o) => o === value);
       if (idx < 0) return false;
-      await box.locator('input[type=radio]').nth(idx).check({ force: true });
-      return true;
+      // Workday's radios are custom: ticking the hidden input "does not change its state".
+      // Click its label (or the radio's spot on screen), like a person, then confirm it took.
+      const radio = box.locator('input[type=radio]').nth(idx);
+      const id = await radio.getAttribute('id').catch(() => null);
+      const label = id ? box.locator(`label[for="${id}"]`).first() : null;
+      if (label && await label.count()) await label.click().catch(() => {});
+      if (!(await radio.isChecked().catch(() => false))) {
+        const b = await radio.boundingBox().catch(() => null);
+        if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+      }
+      if (!(await radio.isChecked().catch(() => false))) await box.getByText(String(value), { exact: true }).first().click().catch(() => {});
+      if (!(await radio.isChecked().catch(() => false))) await radio.check({ force: true }).catch(() => {});
+      return radio.isChecked().catch(() => false);
     }
     case 'checkbox': {
       const cb = box.locator('input[type=checkbox]').first();
-      if (value === false) await cb.uncheck({ force: true }); else await cb.check({ force: true });
-      return true;
+      const want = value !== false;
+      if ((await cb.isChecked().catch(() => false)) !== want) await clickLikeAPerson(page, box, cb);
+      if ((await cb.isChecked().catch(() => false)) !== want) { if (want) await cb.check({ force: true }).catch(() => {}); else await cb.uncheck({ force: true }).catch(() => {}); }
+      return (await cb.isChecked().catch(() => false)) === want;
     }
     case 'checks': {
       const idx = f.options.findIndex((o) => o === value);
       if (idx < 0) return false;
-      await box.locator('input[type=checkbox]').nth(idx).check({ force: true });
+      const cb = box.locator('input[type=checkbox]').nth(idx);
+      if (!(await cb.isChecked().catch(() => false))) await clickLikeAPerson(page, box, cb);
+      if (!(await cb.isChecked().catch(() => false))) await cb.check({ force: true }).catch(() => {});
       return true;
     }
     case 'date': {
