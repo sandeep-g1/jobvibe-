@@ -495,9 +495,26 @@ export function answerQuestion(q, profile, ctx = {}) {
       .find((s) => new RegExp(`(^|[^a-z0-9])${s.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`).test(t));
     if (skill) return text(String(sy[skill]), `your years with ${skill}`);
   }
-  if (/years.{0,30}experience (with|in|using)|experience (with|in) .{2,40}\?/.test(t)) return { needsHuman: true, reason: 'skill-specific experience (answer once, reused after)' };
+  if (/years.{0,30}experience (with|in|using)|experience (with|in) .{2,40}\?/.test(t)) {
+    // Yes/no ("Do you have experience with X?"): yes, in her favour (her rule, 18 Oct 2026).
+    if (!/how many|number of|years/.test(t) || opts.some((o) => /^\s*(yes|no)\b/i.test(o))) return yesno(true, 'assumed: yes (experience)');
+    // A number of years for a skill she hasn't given: half her total experience, flagged.
+    if (profile.totalExpYears != null) return text(String(Math.max(1, Math.round(profile.totalExpYears / 2))), 'assumed: half her total experience');
+    return { needsHuman: true, reason: 'skill-specific experience (answer once, reused after)' };
+  }
   if (/^(school|university|college|institution|institute)( name)?$|name of (your )?(school|university|college|institution)|which (school|university|college)/.test(t)) {
     return text(a.school, 'school / university', 'school or university');
+  }
+  // "Do you have a bachelor's degree?" (yes/no): she has a degree; a specific kind (MBA, engineering…) only if her CVs show it.
+  if (/degree|graduat/.test(t) && opts.length && opts.every((o) => /^\s*(yes|no|select)/i.test(o))) {
+    // Only her education lines count ("engineering" also appears in her work bullets).
+    const facts = lc([`${a.degree || ''} ${a.fieldOfStudy || ''}`, ...`${ctx.cvText || ''}\n${profile.extraCvText || ''}`.split('\n')
+      .filter((l) => /bachelor|master|degree|university|college|b\.?\s?com|m\.?\s?com|mba|b\.?\s?tech|diploma|cgpa/i.test(l) && l.length < 160)].join(' '));
+    const kind = t.match(/\b(mba|engineering|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\b|computer science|law|llb|medical|mbbs|phd|doctorate|ca\b|chartered accountan)/)?.[1];
+    // Whole words: "mba" is inside "Mumbai".
+    const has = (k) => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(facts);
+    if (kind) return yesno(has(kind) || has(kind.replace(/\s/g, '')), `degree type "${kind}" checked against her CV`);
+    return yesno(!!a.degree || /bachelor|master|degree/.test(facts), 'she holds a degree');
   }
   if (/highest (level of )?(education|degree|qualification)|degree/.test(t) && !/field|major|discipline/.test(t)) return text(a.degree, 'degree', 'highest degree');
   if (/field of study|major|discipline|specialization/.test(t)) return text(a.fieldOfStudy, 'field of study', 'field of study');
@@ -599,5 +616,45 @@ export function answerQuestion(q, profile, ctx = {}) {
   }
 
   if (!q.required) return { answer: '', source: 'optional, left blank' };
-  return { needsHuman: true, reason: 'not covered by your answer bank yet' };
+
+  // ---- last resort (her rule, 18 Oct 2026): answer in her favour and keep going instead of
+  // stopping. Every answer here has a source starting "assumed", and the worker tells her on
+  // Telegram what it assumed so she can correct it.
+  // A number ("How many years…?"): half her total experience, flagged.
+  if (!isChoice && /how many|number of|years/.test(t) && profile.totalExpYears != null) {
+    return text(String(Math.max(1, Math.round(profile.totalExpYears / 2))), 'assumed: half her total experience');
+  }
+  const yesNoQ = opts.some((o) => /^\s*(yes|no)\b/i.test(o))
+    || (!isChoice && /^(do|does|did|are|is|have|has|had|can|could|will|would|were|was|should)\b/.test(t));
+  if (yesNoQ) {
+    // Problems (records, cases, sanctions, firings, military, conflicts…): No.
+    if (NEGATIVE_Q.test(t)) return yesno(false, 'assumed: no (no such issue)');
+    // Certificates, licences, degrees: Yes only when her CVs show it (a certificate she doesn't
+    // hold is checked at background verification and can cost the offer). "PMP trained" ≠ certified.
+    if (CREDENTIAL_Q.test(t)) {
+      const facts = lc(`${ctx.cvText || ''} ${profile.extraCvText || ''} ${(profile.skillBank || []).join(' ')}`);
+      const words = t.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).map((w) => w.replace(/s$/, ''))
+        .filter((w) => w.length > 2 && !CRED_STOP.has(w));
+      const held = words.length
+        ? words.some((w) => facts.includes(w) && !(new RegExp(`\\b${w}\\w* (trained|training)`).test(facts) && !new RegExp(`\\b${w}\\w* certif`).test(facts)))
+        : /degree|bachelor|master|certif/.test(facts);
+      return yesno(held, held ? 'assumed: yes (on her CV)' : 'assumed: no (not on her CV; tell me if she holds it)');
+    }
+    // Willingness, availability, experience and everything else: Yes.
+    return yesno(true, 'assumed: yes');
+  }
+  // A list of choices: the most favourable one (yes / agree / willing / immediately…), else the first real one.
+  if (isChoice) {
+    const real = opts.filter((o) => !/^\s*(select|choose|--|please select)/i.test(o));
+    const fav = real.find((o) => /^(yes|i agree|agree|willing|available|immediate|full[- ]time|accept|open to)/i.test(o.trim()));
+    if (fav || real[0]) return { answer: fav || real[0], source: `assumed: picked "${fav || real[0]}"` };
+  }
+  // Free text: the AI writes a short answer from her CV.
+  return { essay: true, reason: 'assumed: AI answer from her CV' };
 }
+
+const NEGATIVE_Q = /convict|criminal|arrest|police|court|cases? (pending|filed|against)|lawsuit|litigation|legal (action|proceeding)|disciplin|sanction|suspend|terminat|dismiss|fired|let go|debar|blacklist|bankrupt|insolven|military|army|armed forces|defen[cs]e (services|forces)|navy|air force|politically exposed|government official|public official|conflict of interest|bribe|corrupt|fraud|drug|substance abuse|felony|misdemeanou?r|investigat|charge[sd]? (against|pending)|visa (refus|reject|denied|cancel)|deport|restrictive covenant|non-?compete|non-?solicit/;
+const CREDENTIAL_Q = /certif|licen[cs]e|chartered|\bcpa\b|\bcfa\b|\bpmp\b|\bacca\b|\bcma\b|\bdegree\b|diploma|qualification/;
+const CRED_STOP = new Set(['you', 'have', 'hold', 'any', 'valid', 'certification', 'certified', 'certificate', 'licence', 'license', 'licensed',
+  'degree', 'current', 'active', 'possess', 'the', 'and', 'with', 'your', 'are', 'does', 'did', 'currently', 'relevant', 'professional',
+  'such', 'equivalent', 'related', 'field', 'from', 'recognized', 'recognised', 'accredited', 'institution', 'university', 'completed', 'obtained', 'qualification']);

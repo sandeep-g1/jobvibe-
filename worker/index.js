@@ -293,6 +293,12 @@ async function processItem(item, browser) {
     r = await applyAssisted({ job, profile, cv, cvName, cvText, label, handOver: true });
   }
   const filled = (r.filled || []).map((f) => ({ label: f.label, value: f.value, source: f.source }));
+  // Questions answered by assumption (her rule: keep going, then tell her): list them once.
+  const assumed = filled.filter((f) => /^assumed/i.test(f.source || ''));
+  if (assumed.length && ['submitted', 'unconfirmed', 'dry_run'].includes(r.status)) {
+    await notify(profile, `ℹ️ For ${label} I answered these myself (no saved answer). Tell me if any is wrong and I'll remember it:\n${assumed.slice(0, 12)
+      .map((f) => `• ${h(String(f.label).slice(0, 110))} → <b>${h(String(f.value).slice(0, 60))}</b>${/not on her CV/.test(f.source) ? ' (not on her CV)' : ''}`).join('\n')}`);
+  }
 
   if (r.status === 'manual') {
     await notify(profile, `✋ Please apply to ${label} yourself: ${h(r.reason)}.
