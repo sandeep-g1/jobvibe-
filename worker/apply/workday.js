@@ -346,24 +346,44 @@ async function fill(page, f, value, files) {
     }
     case 'dropdown': {
       await box.locator('button[aria-haspopup="listbox"]').first().click();
-      const opt = page.locator('[role="listbox"] [role="option"]').filter({ hasText: String(value) }).first();
-      await opt.waitFor({ timeout: 5000 });
+      const all = page.locator('[role="listbox"] [role="option"]');
+      await all.first().waitFor({ timeout: 5000 });
+      // Exact text first: "No" must not land on "None" or "Not applicable".
+      const exact = all.filter({ hasText: new RegExp(`^\\s*${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }).first();
+      const opt = (await exact.count()) ? exact : all.filter({ hasText: String(value) }).first();
       await opt.click();
       await page.waitForTimeout(400);
       return true;
     }
     case 'multi': {
+      // Workday pickers are often nested ("Job Board" → "LinkedIn"). Click through up to three
+      // levels, preferring the answer, then the usual sources, until something is selected.
       const input = box.locator('input').first();
+      const prefs = [String(value), 'LinkedIn', 'Company Website', 'Career Site', 'Careers Website', 'Careers', 'Website', 'Job Board', 'Online', 'Internet', 'Social Media', 'Other']
+        .map((p) => p.toLowerCase());
+      const selected = async () => !!(await box.locator('[data-automation-id="selectedItem"]').count());
       await input.click();
-      await input.fill(String(value));
-      await input.press('Enter');
-      await page.waitForTimeout(1200);
-      const opt = page.locator('[data-automation-id="promptOption"], [role="option"]').filter({ hasText: String(value) }).first();
-      if (!(await opt.count())) return false;
-      await opt.click();
-      await page.waitForTimeout(600);
+      for (let depth = 0; depth < 3; depth++) {
+        await page.locator('[data-automation-id="promptOption"]').first().waitFor({ timeout: 4000 }).catch(() => {});
+        const opts = await page.$$eval('[data-automation-id="promptOption"]', (os) => os.filter((o) => o.getClientRects().length).map((o) => o.innerText.trim()).filter(Boolean)).catch(() => []);
+        if (!opts.length) break;
+        let choice = null;
+        for (const p of prefs) { choice = opts.find((o) => o.toLowerCase() === p) || opts.find((o) => o.toLowerCase().includes(p)); if (choice) break; }
+        if (!choice) break;
+        await page.locator('[data-automation-id="promptOption"]').filter({ hasText: choice }).first().click();
+        await page.waitForTimeout(900);
+        if (await selected()) break;
+      }
+      if (!(await selected())) {
+        // Fallback: search by text, as before.
+        await input.fill(String(value));
+        await input.press('Enter');
+        await page.waitForTimeout(1200);
+        const opt = page.locator('[data-automation-id="promptOption"], [role="option"]').filter({ hasText: String(value) }).first();
+        if (await opt.count()) { await opt.click(); await page.waitForTimeout(600); }
+      }
       await page.keyboard.press('Escape').catch(() => {});
-      return !!(await box.locator('[data-automation-id="selectedItem"]').count());
+      return selected();
     }
     case 'radio': {
       const idx = f.options.findIndex((o) => o === value);
