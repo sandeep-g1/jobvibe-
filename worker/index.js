@@ -128,6 +128,19 @@ async function applyAssisted({ job, profile, cv, cvName, cvText, label, handOver
   }
 }
 
+/**
+ * Workday in a visible window on the PC. Workday's bot protection silently ignored every
+ * account sign-up from the invisible (headless) browser (10 of 10 on 11 Oct 2026).
+ */
+async function applyWorkdayVisible({ job, profile, cv, cvName, cvText, account }) {
+  const visible = await chromium.launch({ headless: false });
+  try {
+    return await applyWorkday({ browser: visible, job, profile, cv, cvName, cvText, dryRun: DRY, ...account });
+  } finally {
+    await visible.close().catch(() => {});
+  }
+}
+
 /* ---------------- Workday accounts ---------------- */
 // One candidate account per employer's Workday site, on her job-hunt email, with a
 // generated password stored encrypted on her profile (profile.workdayAccounts[site]).
@@ -265,7 +278,7 @@ async function processItem(item, browser) {
   // A form that emails a security code after Submit: read it from her connected job-hunt inbox.
   const getEmailCode = profile.mailbox?.passEnc ? (since) => waitForEmailCode(profile.mailbox, { since, company: job.company }) : null;
   let r = ats === 'workday'
-    ? await applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, ...workdayAccount(item.user_id, profile, job.url) })
+    ? await applyWorkdayVisible({ job, profile, cv, cvName, cvText, account: workdayAccount(item.user_id, profile, job.url) })
     : assisted ? await applyAssisted({ job, profile, cv, cvName, cvText, label })
       : await applyOne({ browser, job, profile, cv, cvName, cvText, dryRun: DRY, getEmailCode });
   // A question it can't answer, or a field it can't fill: open the form on the PC's screen,
