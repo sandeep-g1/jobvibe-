@@ -545,6 +545,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
 
     // The wizard: answer what's empty on each page, then Next, until Review.
     const asked = [];
+    let reloads = 0;
     for (let step = 0; step < 14; step++) {
       await settle(page);
       if (await challengeShown(page)) return { status: 'captcha', reason: 'Workday asked for a human check', url, filled };
@@ -631,6 +632,16 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       const before = stepName;
       // A slow page ("Loading…"): wait for its Next button rather than giving up on the first look.
       for (let w = 0; w < 15 && !(await nextBtn.count()); w++) await page.waitForTimeout(2000);
+      // Workday's own hiccup ("Something went wrong. Please refresh the page"): it keeps the draft,
+      // so do what it says, at most twice, and carry on from the same step.
+      if (!(await nextBtn.count()) && /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page)) && reloads < 2) {
+        reloads++;
+        log.push(`Workday asked for a refresh on "${stepName}" (reload ${reloads})`);
+        await page.waitForTimeout(5000);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await page.waitForTimeout(5000);
+        continue;
+      }
       if (!(await nextBtn.count())) {
         return { status: 'failed', reason: `Workday page without a Next button: "${(await pageSays(page)).slice(0, 250)}"`, url, filled, log, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
       }
