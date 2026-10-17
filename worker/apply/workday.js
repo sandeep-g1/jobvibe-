@@ -594,14 +594,22 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         return { status: 'unconfirmed', reason: 'submitted, but Workday showed no confirmation', url, filled, log, clicked, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
       }
 
-      // Answer this page.
-      const fields = await readFields(page);
+      // Answer this page. Two passes: Workday re-draws parts of a page when a field changes (the
+      // phone number clears Phone Device Type on Nasdaq), so after the first pass the page is read
+      // again and any required field left empty is filled once more.
       const ask = [];
       const noGo = [];
+      for (let pass = 0; pass < 2; pass++) {
+      const fields = pass === 0 ? await readFields(page) : (await readFields(page)).filter((x) => !x.filled && x.required && x.type !== 'file');
+      if (pass === 1) {
+        if (!fields.length) break;
+        log.push(`second pass on: ${fields.map((x) => x.label).join(', ').slice(0, 160)}`);
+        ask.length = 0; // re-asked below only if still unanswerable
+      }
       for (const f of fields) {
         // Already set (Workday's resume autofill or an earlier page). The phone number is always
-        // rewritten: autofill can leave a format Workday then rejects ("number isn't recognized").
-        const isPhoneNumber = /phone|mobile/i.test(f.label) && !/ext|code|type|device/i.test(f.label);
+        // rewritten on the first pass: autofill can leave a format Workday then rejects.
+        const isPhoneNumber = pass === 0 && /phone|mobile/i.test(f.label) && !/ext|code|type|device/i.test(f.label);
         // A saved draft may hold a wrong "how did you hear" pick (e.g. "CVOnline"): clear it and pick again.
         if (f.filled && f.type === 'multi' && /how did you (hear|find|learn)|source/i.test(f.label)) {
           const box = page.locator(f.sel).first();
@@ -641,6 +649,8 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         const ok = await fill(page, f, value, files).catch((e) => { log.push(`${f.label}: ${e.message.split('\n')[0]}`); return false; });
         if (ok) filled.push({ label: f.label, value: String(value).slice(0, 200), source: r.source });
         else if (f.required) ask.push({ label: f.label, reason: `couldn't set "${String(value).slice(0, 40)}"`, options: f.options || [], debug: `${f.type}; options [${(f.options || []).slice(0, 8).join(' / ')}]; tried "${String(value).slice(0, 40)}"` });
+      }
+      await page.waitForTimeout(800); // let Workday finish re-drawing before the second look
       }
       if (noGo.length && !job.override) return { status: 'ineligible', reasons: noGo, url };
       if (ask.length) {
