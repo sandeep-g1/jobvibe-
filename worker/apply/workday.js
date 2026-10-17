@@ -58,6 +58,16 @@ async function press(page, target, { timeout = 15000 } = {}) {
 async function settle(page) {
   await page.locator(ID('applyFlowLoadingPage')).waitFor({ state: 'detached', timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1500);
+  // Fields still saying "Loading" (Country on Nasdaq's My Information): wait until they're ready,
+  // or the agent reads them empty and Next can't move on.
+  for (let i = 0; i < 25; i++) {
+    const loading = await page.evaluate(() => {
+      const root = document.querySelector('[data-automation-id="applyFlowPage"]') || document.body;
+      return /(^|\n)\s*Loading\s*(\n|$)/.test(root.innerText) || !!root.querySelector('[data-automation-id="loadingSpinner"], [data-automation-id*="Loading" i]:not([data-automation-id="applyFlowLoadingPage"])');
+    }).catch(() => false);
+    if (!loading) break;
+    await page.waitForTimeout(1000);
+  }
 }
 
 async function challengeShown(page) {
