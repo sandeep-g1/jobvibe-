@@ -529,9 +529,14 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       const text = await bodyText(page);
       if (/(job|posting) (is )?no longer available|page (you are looking for )?(doesn't|does not) exist/i.test(text)) return { status: 'closed', reason: 'the employer has closed this job', url };
       await press(page, 'adventureButton', { timeout: 20000 });
-      const how = page.locator(`${ID('autofillWithResume')}, ${ID('applyManually')}`).first();
-      await how.waitFor({ timeout: 15000 }).catch(() => {});
-      if (await how.count()) await press(page, how);
+      // "Apply Manually", not "Autofill with Resume": Workday's resume reader failed on our CV with
+      // "Something went wrong" (error VPS) on Nasdaq. The agent fills every field itself and
+      // attaches the CV on My Experience, so nothing is lost.
+      const either = page.locator(`${ID('applyManually')}, ${ID('autofillWithResume')}`).first();
+      await either.waitFor({ timeout: 15000 }).catch(() => {});
+      const manual = page.locator(`${ID('applyManually')}:visible`).first();
+      if (await manual.count()) await press(page, manual);
+      else if (await either.count()) await press(page, either);
       await settle(page);
       if (ALREADY.test(await bodyText(page))) return { status: 'already_applied', reason: 'Workday says you already applied to this job', url };
       const r = await enter(page, { account, profile, createAccount, getVerifyLink, getResetLink, recover: attempt === 0 });
