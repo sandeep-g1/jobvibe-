@@ -600,7 +600,8 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         log.push(`stayed on "${stepName}" after Next`);
       }
     }
-    return { status: 'failed', reason: 'Workday wizard did not reach the review page', url, filled, log };
+    return { status: 'failed', reason: `Workday wizard did not reach the review page (stuck on "${(await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 60)}")`, url, filled, log,
+      screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   } catch (err) {
     if (clicked) return { status: 'unconfirmed', reason: `after submitting: ${err.message.split('\n')[0]}`, url, log, clicked };
     // Say what the page showed, and keep a picture of it, so the next fix isn't guesswork.

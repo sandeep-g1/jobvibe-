@@ -360,11 +360,11 @@ async function processItem(item, browser) {
     const shot = join(tmpdir(), 'jobvibe-apply', `failed-${item.id}-${attempts}.png`);
     try { writeFileSync(shot, r.screenshot); log(`${item.user_id}: failure screenshot ${shot}`); } catch { /* best effort */ }
   }
-  if (attempts < 2 && !r.noRetry) return save('queued', r.reason, { lastError: r.reason }, attempts);
+  if (attempts < 2 && !r.noRetry) return save('queued', r.reason, { lastError: r.reason, ...(r.log?.length ? { formLog: r.log.slice(-15) } : {}) }, attempts);
   await notify(profile, `⚠️ I couldn't apply to ${label}: ${h(r.reason || 'unknown error')}.\n<a href="${h(job.url)}">Open the application</a> to apply yourself. Your CV and the job description are attached.`);
   await notifyFile(profile, { kind: 'document', buffer: cv, filename: cvName, caption: `CV for ${h(job.title)} at ${h(job.company)}` });
   await notifyFile(profile, jdFile(job));
-  return save('failed', r.reason, { filled }, attempts);
+  return save('failed', r.reason, { filled, ...(r.log?.length ? { formLog: r.log.slice(-15) } : {}) }, attempts);
 }
 
 /* ---------------- website "Tailor CV" requests ---------------- */
