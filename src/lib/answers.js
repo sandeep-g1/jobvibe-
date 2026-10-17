@@ -523,7 +523,10 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/(18|eighteen) years|legal age|age of majority/.test(t)) return yesno(true, 'adult');
   if (/how did you (hear|find|learn|get to know|come to know|come across)|source of (application|referral)|where did you (hear|see|find)/.test(t)) {
     if (!isChoice) return { answer: 'Company careers website', source: 'default' };
-    const o = opts.find((x) => /company (career|website)|careers? (page|site)|corporate website|website|job site/i.test(x) && !/college|university|campus|event|fair/i.test(x))
+    // LinkedIn first where offered: she finds jobs through LinkedIn and its alerts, and it is a
+    // single choice (Workday's "Career Websites and Job Boards" opens a second list).
+    const o = opts.find((x) => /^linkedin\b/i.test(x.trim()))
+      || opts.find((x) => /company (career|website)|careers? (page|site)|corporate website|website|job site/i.test(x) && !/college|university|campus|event|fair/i.test(x))
       || opts.find((x) => /job board|online|linkedin/i.test(x)) || opts.find((x) => /^other/i.test(x));
     return o ? { answer: o, source: 'default' } : { needsHuman: true, reason: 'referral source options' };
   }
