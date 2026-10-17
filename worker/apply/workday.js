@@ -405,7 +405,7 @@ async function fill(page, f, value, files) {
       // Workday pickers are often nested ("Job Board" → "LinkedIn"). Click through up to three
       // levels, preferring the answer, then the usual sources, until something is selected.
       const input = box.locator('input').first();
-      const prefs = [String(value), 'LinkedIn', 'Company Website', 'Career Site', 'Careers Website', 'Careers', 'Website', 'Job Board', 'Online', 'Internet', 'Social Media', 'Other']
+      const prefs = [String(value), 'LinkedIn', 'Company Website', 'Career Site', 'Careers Website', 'Careers', 'Website', 'Job Board', 'Social Media', 'Other']
         .map((p) => p.toLowerCase());
       const selected = async () => !!(await box.locator('[data-automation-id="selectedItem"]').count());
       await input.click();
@@ -414,7 +414,9 @@ async function fill(page, f, value, files) {
         const opts = await popupOptions(page); // only the open popup, never other fields' chosen items
         if (!opts.length) break;
         let choice = null;
-        for (const p of prefs) { choice = opts.find((o) => o.text.toLowerCase() === p) || opts.find((o) => o.text.toLowerCase().includes(p)); if (choice) break; }
+        // Whole words only: "online" must not pick "CVOnline".
+        const word = (o, p) => ` ${o.text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `.includes(` ${p.replace(/[^a-z0-9]+/g, ' ').trim()} `);
+        for (const p of prefs) { choice = opts.find((o) => o.text.toLowerCase() === p) || opts.find((o) => word(o, p)); if (choice) break; }
         if (!choice) break;
         await choice.handle.click();
         await page.waitForTimeout(900);
@@ -553,7 +555,24 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       const ask = [];
       const noGo = [];
       for (const f of fields) {
-        if (f.filled) continue; // Workday's resume autofill or an earlier page already set it
+        // Already set (Workday's resume autofill or an earlier page). The phone number is always
+        // rewritten: autofill can leave a format Workday then rejects ("number isn't recognized").
+        const isPhoneNumber = /phone|mobile/i.test(f.label) && !/ext|code|type|device/i.test(f.label);
+        // A saved draft may hold a wrong "how did you hear" pick (e.g. "CVOnline"): clear it and pick again.
+        if (f.filled && f.type === 'multi' && /how did you (hear|find|learn)|source/i.test(f.label)) {
+          const box = page.locator(f.sel).first();
+          const chosen = (await box.locator('[data-automation-id="selectedItem"]').allInnerTexts().catch(() => [])).join(' ');
+          if (!/linkedin|company website|career|website|job board/i.test(chosen)) {
+            for (let i = 0; i < 3; i++) {
+              const x = box.locator('[data-automation-id="selectedItem"] [data-automation-id="DELETE_charm"], [data-automation-id="selectedItem"] [role="button"], [data-automation-id="selectedItem"] button').first();
+              if (!(await x.count())) break;
+              await x.click().catch(() => {});
+              await page.waitForTimeout(400);
+            }
+            f.filled = !!(await box.locator('[data-automation-id="selectedItem"]').count());
+          }
+        }
+        if (f.filled && !isPhoneNumber) continue;
         if (f.type === 'file') { if (await fill(page, f, null, files)) filled.push({ label: f.label || 'Resume', value: '[file] CV', source: 'CV' }); continue; }
         if (f.type === 'dropdown') f.options = await dropdownOptions(page, f);
         if (f.type === 'multi') f.options = await multiOptions(page, f);
@@ -596,8 +615,19 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       const after = (await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ');
       if (after === before) {
         const errs = await visibleErrors(page);
-        if (errs.length) return { status: 'needs_user', questions: errs.slice(0, 6).map((e) => ({ label: e.replace(/^error[-:\s]*/i, ''), reason: `Workday (${stepName || 'form'}) needs this` })), url };
+        // Workday's "Errors Found" summary box isn't always marked as an error element: read it.
+        const says = await pageSays(page);
+        const summary = says.match(/Errors? Found([\s\S]{0,400})/i)?.[1]?.trim();
+        if (errs.length || summary) {
+          return { status: 'failed', reason: `Workday (${stepName || 'form'}) said: ${(errs.join(' | ') || summary).replace(/\s+/g, ' ').slice(0, 260)}`, url, filled, log,
+            screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
+        }
         log.push(`stayed on "${stepName}" after Next`);
+        // Twice on the same step with nothing shown: stop and report, don't press Next 14 times.
+        if (log.filter((l) => l === `stayed on "${stepName}" after Next`).length >= 2) {
+          return { status: 'failed', reason: `Workday would not move past "${stepName}": "${says.slice(0, 200)}"`, url, filled, log,
+            screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
+        }
       }
     }
     return { status: 'failed', reason: `Workday wizard did not reach the review page (stuck on "${(await page.locator(ID('progressBarActiveStep')).first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 60)}")`, url, filled, log,

@@ -323,6 +323,8 @@ export function answerQuestion(q, profile, ctx = {}) {
     const o = opts.find((x) => x.includes(`(${dial})`) || x.includes(dial) && new RegExp(`\\b${name}\\b`, 'i').test(x)) || opts.find((x) => new RegExp(`^${name}\\b`, 'i').test(x));
     return o ? { answer: o, source: 'your city' } : { needsHuman: true, reason: 'phone country code options' };
   }
+  // A phone extension is not the phone number: leave it empty (Workday rejects the number in it).
+  if (/\bext(ension)?\b/.test(t)) return { answer: '', source: 'no extension' };
   if (/phone|mobile|contact number/.test(t)) return text(a.phone, 'phone', 'phone');
   if (/linkedin/.test(t)) return text(String(a.linkedin || '').replace(/[?#].*$/, ''), 'linkedin', 'LinkedIn URL'); // no tracking tail (?isSelf…)
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
