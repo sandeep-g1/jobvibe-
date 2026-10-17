@@ -674,6 +674,9 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
     return { status: 'failed', reason: `Workday: ${err.message.split('\n')[0]}${says ? ` | page said: "${says}"` : ''}`, url, filled, log,
       screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
   } finally {
+    // For inspection: keep the window open a while after the run (profile.workdayHoldSec).
+    const hold = Number(profile?.workdayHoldSec) || 0;
+    if (hold > 0) await page.waitForTimeout(Math.min(hold, 900) * 1000).catch(() => {});
     await context.close();
   }
 }
