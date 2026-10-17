@@ -655,7 +655,9 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       for (let w = 0; w < 15 && !(await nextBtn.count()); w++) await page.waitForTimeout(2000);
       // Workday's own hiccup ("Something went wrong. Please refresh the page"): it keeps the draft,
       // so do what it says, at most twice, and carry on from the same step.
-      if (!(await nextBtn.count()) && /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page)) && reloads < 2) {
+      // Same for a blank page (only Workday's header and footer, no form): reload.
+      const blank = !(await page.locator('[data-automation-id="applyFlowPage"], [data-automation-id="progressBar"]').count());
+      if (!(await nextBtn.count()) && (blank || /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page))) && reloads < 2) {
         reloads++;
         log.push(`Workday asked for a refresh on "${stepName}" (reload ${reloads})`);
         await page.waitForTimeout(5000);
