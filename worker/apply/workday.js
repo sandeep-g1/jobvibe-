@@ -629,6 +629,8 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       }
 
       const before = stepName;
+      // A slow page ("Loading…"): wait for its Next button rather than giving up on the first look.
+      for (let w = 0; w < 15 && !(await nextBtn.count()); w++) await page.waitForTimeout(2000);
       if (!(await nextBtn.count())) {
         return { status: 'failed', reason: `Workday page without a Next button: "${(await pageSays(page)).slice(0, 250)}"`, url, filled, log, screenshot: await page.screenshot({ fullPage: true }).catch(() => null) };
       }
