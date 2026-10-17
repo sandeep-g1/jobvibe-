@@ -349,13 +349,9 @@ const readFields = (page) => page.evaluate(() => {
  * same time (the Skills box's "… (Suggested)" list), so read the button's own list: the one it
  * names in aria-controls, else the newest visible list that isn't a skills suggestion list.
  */
-async function ownOptions(page, btn) {
-  const id = await btn.getAttribute('aria-controls').catch(() => null);
-  if (id) {
-    const own = page.locator(`[id="${id}"] [role="option"]`);
-    await own.first().waitFor({ timeout: 4000 }).catch(() => {});
-    if (await own.count()) return own;
-  }
+async function ownOptions(page, btn) { // eslint-disable-line no-unused-vars
+  // The open list is the visible one (aria-controls pointed at a list whose options didn't take a
+  // click on Nasdaq: every dropdown stayed "Select One").
   await page.locator('[role="listbox"]:visible [role="option"]').first().waitFor({ timeout: 4000 }).catch(() => {});
   const lists = page.locator('[role="listbox"]:visible');
   for (let i = (await lists.count()) - 1; i >= 0; i--) {
@@ -429,9 +425,19 @@ async function fill(page, f, value, files) {
       // Exact text first: "No" must not land on "None" or "Not applicable".
       const exact = all.filter({ hasText: new RegExp(`^\\s*${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }).first();
       const opt = (await exact.count()) ? exact : all.filter({ hasText: String(value) }).first();
-      await opt.click();
-      await page.waitForTimeout(400);
-      return true;
+      await opt.click().catch(() => {});
+      await page.waitForTimeout(500);
+      // Confirm the dropdown now shows the answer; if not, type it and press Enter (Workday lists
+      // select the highlighted match), then check again.
+      const shows = async () => new RegExp(`\\b${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(await btn.innerText().catch(() => ''));
+      if (!(await shows())) {
+        await btn.click().catch(() => {});
+        await page.waitForTimeout(400);
+        await page.keyboard.type(String(value), { delay: 60 });
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(600);
+      }
+      return shows();
     }
     case 'multi': {
       // Workday pickers are often nested ("Job Board" → "LinkedIn"). Click through up to three
