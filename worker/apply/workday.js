@@ -84,10 +84,29 @@ const visibleErrors = (page) => page.evaluate((sel) => [...document.querySelecto
 /* ---------------- sign in / create account ---------------- */
 
 async function signIn(page, acc) {
-  await page.locator(ID('email')).first().fill(acc.email);
-  await page.locator(ID('password')).first().fill(acc.password);
+  // Some sites (Nasdaq) open on the Create Account form, which has email and password boxes
+  // too: switch to the sign-in form first ("Already have an account? Sign In").
+  if (await page.locator(`${ID('verifyPassword')}:visible`).count()) {
+    const link = page.locator(`${ID('signInLink')}:visible`).first();
+    if (await link.count()) await press(page, link);
+    else await page.getByRole('button', { name: /^sign in$/i }).or(page.getByRole('link', { name: /^sign in$/i })).last().click().catch(() => {});
+    await page.locator(`${ID('signInSubmitButton')}`).first().waitFor({ state: 'attached', timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(800);
+  }
+  // Typed key by key: Workday's form can ignore values set in one go.
+  for (const [id, value] of [['email', acc.email], ['password', acc.password]]) {
+    const el = page.locator(`${ID(id)}:visible`).first();
+    await el.click();
+    await el.fill('');
+    await el.pressSequentially(value, { delay: 40 });
+  }
   await press(page, 'signInSubmitButton');
   await settle(page);
+  // Still on the sign-in form with no error: try Enter, as with Create Account.
+  if (await page.locator(`${ID('signInSubmitButton')}:visible`).count() && !(await visibleErrors(page)).length) {
+    await page.locator(`${ID('password')}:visible`).first().press('Enter').catch(() => {});
+    await settle(page);
+  }
 }
 
 /** The page's own submit-type button (reset/send/continue/save), never Cancel/Back/Sign In links. */
