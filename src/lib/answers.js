@@ -290,7 +290,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   const text = (v, source, missing) => (v === '' || v == null
     ? { needsHuman: true, reason: `${missing} is not in your answer bank yet` }
     : isChoice
-      ? (pickOption(v, opts) ? { answer: pickOption(v, opts), source } : { needsHuman: true, reason: `"${v}" doesn't match the options` })
+      ? (pickOption(v, opts) ? { answer: pickOption(v, opts), source } : { needsHuman: true, reason: `"${v}" doesn't match the options`, wanted: v })
       : { answer: v, source });
 
   // ---- the user's own earlier answer to this question wins over every rule ----

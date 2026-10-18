@@ -419,7 +419,9 @@ async function fill(page, f, value, files) {
     }
     case 'dropdown': {
       const btn = box.locator('button[aria-haspopup="listbox"]').first();
-      const shows = async () => new RegExp(`\\b${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(await btn.innerText().catch(() => ''));
+      // Accents ignored: typing "Karnataka" selects "Karnātaka".
+      const flat = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const shows = async () => new RegExp(`\\b${flat(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(flat(await btn.innerText().catch(() => '')));
       // Lists can load slowly (Country after a refresh): open it up to 3 times, waiting for options.
       for (let tryNo = 0; tryNo < 3 && !(await shows()); tryNo++) {
         await btn.click().catch(() => {});
@@ -642,6 +644,11 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
           const d = await draftAnswer({ question: f.label, type: 'textarea', job, profile, cvText });
           if (!d.ok) { ask.push({ label: f.label, reason: `couldn't draft: ${d.error}` }); continue; }
           if (await fill(page, f, d.text, files)) filled.push({ label: f.label, value: d.text.slice(0, 200), source: 'AI draft' });
+          continue;
+        }
+        // Long lists (states) load only their first options: type the answer, the list finds it.
+        if (r.needsHuman && r.wanted && f.type === 'dropdown' && await fill(page, f, r.wanted, files).catch(() => false)) {
+          filled.push({ label: f.label, value: String(r.wanted), source: 'typed into the list' });
           continue;
         }
         if (r.needsHuman) { if (f.required) ask.push({ label: f.label, reason: r.reason, options: f.options || [], debug: `${f.type}; options [${(f.options || []).slice(0, 8).join(' / ')}]; engine: ${r.reason}` }); continue; }
