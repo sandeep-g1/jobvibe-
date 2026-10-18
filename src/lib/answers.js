@@ -510,7 +510,7 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (profile.totalExpYears != null) return text(String(Math.max(1, Math.round(profile.totalExpYears / 2))), 'assumed: half her total experience');
     return { needsHuman: true, reason: 'skill-specific experience (answer once, reused after)' };
   }
-  if (/^(school|university|college|institution|institute)( name)?$|name of (your )?(school|university|college|institution)|which (school|university|college)/.test(t)) {
+  if (/^(school|university|college|institution|institute)( or (school|university|college|institution))?( name)?$|name of (your )?(school|university|college|institution)|which (school|university|college)/.test(t)) {
     return text(a.school, 'school / university', 'school or university');
   }
   // "Do you have a bachelor's degree?" (yes/no): she has a degree; a specific kind (MBA, engineering…) only if her CVs show it.
@@ -524,8 +524,22 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (kind) return yesno(has(kind) || has(kind.replace(/\s/g, '')), `degree type "${kind}" checked against her CV`);
     return yesno(!!a.degree || /bachelor|master|degree/.test(facts), 'she holds a degree');
   }
-  if (/highest (level of )?(education|degree|qualification)|degree/.test(t) && !/field|major|discipline/.test(t)) return text(a.degree, 'degree', 'highest degree');
-  if (/field of study|major|discipline|specialization/.test(t)) return text(a.fieldOfStudy, 'field of study', 'field of study');
+  if (/highest (level of )?(education|degree|qualification)|degree/.test(t) && !/field|major|discipline/.test(t)) {
+    const r = text(a.degree, 'degree', 'highest degree');
+    if (!r.needsHuman || !a.degree) return r;
+    // Lists name the level ("Master's", "Bachelor's"), not "Master's Degree" / "M.Com".
+    const lvl = /master|m\.?\s?com|\bm\.?\s?a\b|m\.?\s?sc|mba/i.test(a.degree) ? 'Master' : /bachelor|b\.?\s?com|\bb\.?\s?a\b|b\.?\s?sc/i.test(a.degree) ? 'Bachelor' : null;
+    const o = lvl && opts.find((x) => new RegExp(`^${lvl}`, 'i').test(x));
+    return o ? { answer: o, source: 'degree level' } : lvl ? { ...r, wanted: lvl } : r;
+  }
+  if (/field of study|major|discipline|specialization/.test(t)) {
+    const r = text(a.fieldOfStudy, 'field of study', 'field of study');
+    if (!r.needsHuman || !a.fieldOfStudy) return r;
+    // Long fixed lists: Commerce / Accountancy appears as "Accounting" or "Commerce".
+    const o = opts.find((x) => /^accounting$/i.test(x) && /accountan|accounting/i.test(a.fieldOfStudy))
+      || opts.find((x) => /^commerce$/i.test(x) && /commerce/i.test(a.fieldOfStudy));
+    return o ? { answer: o, source: 'field of study' } : r;
+  }
   if (/graduat.{0,20}year|year of (graduation|passing)/.test(t)) return text(a.graduationYear, 'graduation year', 'graduation year');
   if (/driv(ing|er'?s) licen[cs]e/.test(t)) return a.drivingLicense === '' ? { needsHuman: true, reason: 'driving licence not set' } : yesno(a.drivingLicense === 'yes', 'driving licence');
   // "In addition to English, any other languages you speak fluently?": her languages other than English.

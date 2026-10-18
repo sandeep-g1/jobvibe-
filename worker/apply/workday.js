@@ -393,7 +393,8 @@ async function popupOptions(page) {
 async function multiOptions(page, f) {
   await page.locator(f.sel).locator('input').first().click().catch(() => {});
   await page.waitForTimeout(1200);
-  const opts = (await popupOptions(page)).map((o) => o.text);
+  // A search picker (School) shows "No Items." until you type: no fixed choices then.
+  const opts = (await popupOptions(page)).map((o) => o.text).filter((o) => !/^no items\.?$/i.test(o));
   await page.keyboard.press('Escape').catch(() => {});
   return [...new Set(opts)].slice(0, 100);
 }
@@ -473,6 +474,19 @@ async function fill(page, f, value, files) {
         await input.press('Enter');
         await page.waitForTimeout(1500);
         const opt = (await popupOptions(page)).find((o) => o.text.toLowerCase().includes(String(value).toLowerCase()));
+        if (opt) { await opt.handle.click(); await page.waitForTimeout(600); }
+      }
+      // Search lists name places differently ("University of Mumbai" / "Mumbai University"):
+      // search by its main word and take an option with all its words, else "Other".
+      const words = String(value).toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3 && !/^(university|college|institute|school)$/.test(w));
+      for (const q of words.length ? [words[0], 'Other'] : []) {
+        if (await selected()) break;
+        await input.fill(q);
+        await input.press('Enter');
+        await page.waitForTimeout(1500);
+        const all = await popupOptions(page);
+        const opt = q === 'Other' ? all.find((o) => /^other\b/i.test(o.text))
+          : all.find((o) => words.every((w) => o.text.toLowerCase().includes(w)) && /universit|college|institut/i.test(o.text));
         if (opt) { await opt.handle.click(); await page.waitForTimeout(600); }
       }
       await page.keyboard.press('Escape').catch(() => {});
@@ -647,7 +661,7 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
           continue;
         }
         // Long lists (states) load only their first options: type the answer, the list finds it.
-        if (r.needsHuman && r.wanted && f.type === 'dropdown' && await fill(page, f, r.wanted, files).catch(() => false)) {
+        if (r.needsHuman && r.wanted && ['dropdown', 'multi'].includes(f.type) && await fill(page, f, r.wanted, files).catch(() => false)) {
           filled.push({ label: f.label, value: String(r.wanted), source: 'typed into the list' });
           continue;
         }
