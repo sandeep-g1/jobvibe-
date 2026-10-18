@@ -366,7 +366,14 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (!w.status) return { needsHuman: true, reason: `work status in ${COUNTRY_NAMES[cc]} not set` };
     return yesno(['citizen', 'permanent', 'visa_no_sponsor', 'visa_future_sponsor'].includes(w.status), `work status in ${COUNTRY_NAMES[cc]}`);
   }
-  if (/citizenship|nationality/.test(t)) return text(a.nationality, 'nationality', 'nationality');
+  // US status (citizen, national, green card, asylee, refugee): from her US work status. Before the
+  // nationality rule: Nasdaq's version opens with "…country of citizenship…" trade-control text.
+  if (/u\.?\s?s\.? (citizen|national)|green card|lawful permanent resident|asylee|refugee/.test(t)) {
+    const us = a.workAuth?.US?.status;
+    return yesno(us === 'citizen' || us === 'permanent', 'your US status');
+  }
+  // A yes/no question that mentions citizenship isn't asking for her nationality.
+  if (/citizenship|nationality/.test(t) && !(isChoice && opts.every((o) => /^\s*(yes|no|select)/i.test(o)))) return text(a.nationality, 'nationality', 'nationality');
 
   // ---- messaging / marketing opt-ins: always no ----
   if (/opt[- ]?in|whatsapp|\bsms\b|text messages?|newsletter|marketing (emails?|communications?)/.test(t) && !/privacy|processing of my personal data/.test(t)) {
@@ -538,11 +545,6 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (o) return { answer: o, source: 'default: email' };
   }
   if (/(18|eighteen) years|legal age|age of majority/.test(t)) return yesno(true, 'adult');
-  // US status (citizen, national, green card, asylee, refugee): from her US work status.
-  if (/u\.?\s?s\.? (citizen|national)|green card|lawful permanent resident|asylee|refugee/.test(t)) {
-    const us = a.workAuth?.US?.status;
-    return yesno(us === 'citizen' || us === 'permanent', 'your US status');
-  }
   // Securities licences / registrations (NISM in India, FINRA series in the US): her standing answer.
   if (/securities licen[cs]es?|securities registrations?|series (7|63|65|66)\b|finra registration/.test(t)) {
     const v = a.declarations?.securitiesLicense;
