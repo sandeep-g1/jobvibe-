@@ -41,7 +41,7 @@ ${String(job.jd_text).slice(0, 9000)}
 CANDIDATE CV:
 ${cv}
 
-Return ONLY JSON: {"fails":[{"requirement":"short, as the posting says it","why":"what her CV shows instead"}]}`, { json: true, temperature: 0, maxTokens: 1024 });
+Return ONLY JSON: {"fails":[{"requirement":"short, as the posting says it","why":"what her CV shows instead"}]}`, { json: true, temperature: 0, maxTokens: 1024, tier: 'lite' });
   const out = r.ok ? parse(r.text) : null;
   if (!out || !Array.isArray(out.fails)) return null; // couldn't check: don't block the job
   const fails = out.fails.filter((f) => f && f.requirement).slice(0, 5)

@@ -42,7 +42,7 @@ ${String(cvText || profile.resumeText || '').slice(0, 6000)}
 JOB DESCRIPTION:
 ${String(job.jd_text || '').slice(0, 5000)}`;
 
-  const r = await generate(prompt, { temperature: 0.6, maxTokens: 1024 });
+  const r = await generate(prompt, { temperature: 0.6, maxTokens: 1024, essential: true });
   if (!r.ok) return { ok: false, error: r.error };
   let text = humanize(String(r.text || '').trim().replace(/^["']|["']$/g, ''), { allowEmDash: false });
   const words = text.split(/\s+/).filter(Boolean);

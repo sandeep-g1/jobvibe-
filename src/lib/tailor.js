@@ -129,7 +129,7 @@ Also list, from the JD, every NAMED tool, technology, platform, programming lang
 (e.g. Selenium, Snowflake, SWIFT, ISO 20022, Tableau, CSM), whether or not it is in your 25.
 JOB: ${job.title || ''} at ${job.company || ''}
 ${String(job.jd_text || '').slice(0, 12000)}
-Return ONLY JSON: {"keywords":["..."],"named":["..."]}`, { json: true, temperature: 0, maxTokens: 2048, model, timeoutMs: 240000 });
+Return ONLY JSON: {"keywords":["..."],"named":["..."]}`, { json: true, temperature: 0, maxTokens: 2048, model, timeoutMs: 240000, tier: 'lite', essential: true });
   const p = r.ok ? parseJson(r.text) : null;
   const list = (p?.keywords || []).map(String).filter(Boolean).slice(0, 25);
   const named = (p?.named || []).map(String).filter(Boolean).slice(0, 40);
@@ -186,7 +186,7 @@ she has done (e.g. "sprint planning" for someone who ran Agile delivery). "no": 
 KEYWORDS: ${kw.keywords.join(' | ')}
 HER EXPERIENCE:
 ${facts.slice(0, 14000)}
-Return ONLY JSON: {"<keyword>":"yes|close|no", ...}`, { json: true, temperature: 0, maxTokens: 2048, model: keywordModel, timeoutMs: 240000 });
+Return ONLY JSON: {"<keyword>":"yes|close|no", ...}`, { json: true, temperature: 0, maxTokens: 2048, model: keywordModel, timeoutMs: 240000, tier: 'lite', essential: true });
   const verdict = sup.ok ? parseJson(sup.text) || {} : {};
   for (const k of kw.keywords) if (verdict[k] === 'no' && !lacks.includes(k)) lacks.push(k);
   const target = kw.keywords.filter((k) => !lacks.some((n) => n.toLowerCase() === k.toLowerCase()));
@@ -258,7 +258,7 @@ ${editable.map((l) => `[${l.index}] (${l.section}) ${l.text}`).join('\n').slice(
 
 Return ONLY JSON: {"keywords":["..."],"edits":{"<id>":"<rewritten line>"},"gaps":["..."]}`;
 
-  const r = await generate(prompt, { json: true, temperature: 0.35, maxTokens: 24000, model, timeoutMs: 240000 });
+  const r = await generate(prompt, { json: true, temperature: 0.35, maxTokens: 24000, model, timeoutMs: 240000, thinking: 'medium', essential: true });
   if (!r.ok) return { ok: false, error: r.error };
   const usage = { model: r.model, in: (r.usage?.in || 0) + (kw.usage?.in || 0) + (sup.usage?.in || 0), out: (r.usage?.out || 0) + (kw.usage?.out || 0) + (sup.usage?.out || 0) };
   const parsed = parseJson(r.text);
@@ -389,7 +389,7 @@ PROBLEM: ${f.why}`).join('\n\n')}
 ${allowed.length ? `ALLOWED ADDITIONS: ${allowed.map((a) => a.skill).join(', ')}
 ` : ''}CANDIDATE SKILLS: ${candidate.join(', ').slice(0, 1200)}
 Return ONLY JSON: {"edits":{"<id>":"<rewritten line>"}}`;
-    const r2 = await generate(fix, { json: true, temperature: 0.2, maxTokens: 8192, model, timeoutMs: 240000 });
+    const r2 = await generate(fix, { json: true, temperature: 0.2, maxTokens: 8192, model, timeoutMs: 240000, essential: true });
     if (r2.ok) { usage.in += r2.usage?.in || 0; usage.out += r2.usage?.out || 0; }
     const p2 = r2.ok ? parseJson(r2.text) : null;
     accept(p2?.edits || {}, 2);
@@ -447,7 +447,7 @@ Return ONLY JSON: {"edits":{"<id>":"<new line>"}}`, opts);
   // every keyword the line carried.
   // Up to three rounds, until the reviewer reads it as a person's CV (ai_feel 4 or less).
   let human = null;
-  for (let round = 1; round <= 3; round++) {
+  for (let round = 1; round <= 1; round++) { // one review round (cost: rounds 2-3 changed little; 18 Oct 2026)
     const reviewLines = lines.filter((l) => valid[l.index] != null);
     if (!reviewLines.length) break;
     const r4 = await generate(`You screen hundreds of CVs a week and can tell when one was written or keyword-stuffed by AI.

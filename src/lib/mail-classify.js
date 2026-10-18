@@ -105,7 +105,7 @@ Also report:
 
 Return ONLY JSON: {"category":"...","company":"employer name or null","summary":"one or two plain sentences, what they want and by when","draft_reply":"..." or null,"needs":"what the candidate must provide, or null","asks":[],"real_person":true}`;
 
-  const r = await generate(prompt, { json: true, temperature: 0.2, maxTokens: 1200 });
+  const r = await generate(prompt, { json: true, temperature: 0.2, maxTokens: 1200, tier: 'lite', essential: true });
   if (!r.ok) return { ok: false, error: r.error };
   const out = parse(r.text);
   if (!out || !CATEGORIES.includes(out.category)) return { ok: false, error: 'unusable classification' };

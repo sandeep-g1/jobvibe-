@@ -61,7 +61,7 @@ ${String(mail.text || '').slice(0, 6000)}
 
 LINKS:
 ${links}`;
-  const r = await generate(prompt, { json: true, temperature: 0, maxTokens: 4096 });
+  const r = await generate(prompt, { json: true, temperature: 0, maxTokens: 4096, tier: 'lite' });
   if (!r.ok) return [];
   let parsed; try { parsed = JSON.parse(r.text); } catch { parsed = null; }
   const list = (mail.links || []).filter((l) => l.text.length > 3 && l.text.length < 120);

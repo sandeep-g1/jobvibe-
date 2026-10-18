@@ -24,7 +24,7 @@ export async function companyRating(name) {
 - staffing: true if it is a recruitment, staffing or job-placement agency (posting for someone else's job).
 - pay: the employer's usual pay versus the Indian market for professional roles: "high", "average" or "low".
 If you don't recognise the name, say tier 3, pay "average".
-Return ONLY JSON: {"tier":1,"staffing":false,"pay":"average","note":"a few words"}`, { json: true, temperature: 0, maxTokens: 512 });
+Return ONLY JSON: {"tier":1,"staffing":false,"pay":"average","note":"a few words"}`, { json: true, temperature: 0, maxTokens: 512, tier: 'lite' });
   let out = null;
   try { out = JSON.parse(r.text); } catch { /* unrated */ }
   if (!out || ![1, 2, 3].includes(Number(out.tier))) return null; // try again next time

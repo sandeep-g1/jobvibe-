@@ -5,6 +5,13 @@ import { cleanEnv } from '../db/driver.js';
 
 // 2.0-flash and 1.5-flash were retired (404). The alias tracks Google's current flash model.
 const MODELS = ['gemini-flash-latest', 'gemini-3.8-flash'];
+// Simple jobs (reading emails, yes/no checks, ratings, keyword lists) use Flash-Lite: about a
+// third of Flash's price ($0.25 / $1.50 per 1M tokens, Oct 2026). Falls back to Flash if missing.
+const LITE = ['gemini-3.1-flash-lite', 'gemini-flash-lite-latest', ...MODELS];
+// Daily AI budget in USD (IST day). Past it, only calls marked essential run.
+const DAILY_CAP_USD = () => Number(cleanEnv(process.env.AI_DAILY_CAP_USD)) || 1.5;
+let spendCache = { day: '', usd: 0, at: 0 };
+const noThinking = new Set(); // models that rejected thinkingConfig: stop sending it to them
 // Current flash models "think" before answering, and those tokens count against
 // maxOutputTokens. Without headroom a 1,024-token answer budget left ~40 tokens.
 const THINKING_HEADROOM = 8192;
@@ -19,9 +26,15 @@ export function geminiConfigured() {
  * (or only `model`, when given: e.g. a pro model for resume tailoring).
  * @returns {{ ok:boolean, text?:string, error?:string }}
  */
-export async function generate(prompt, { json = false, temperature = 0.2, maxTokens = 4096, model: only = null, timeoutMs = 45000 } = {}) {
+export async function generate(prompt, {
+  json = false, temperature = 0.2, maxTokens = 4096, model: only = null, timeoutMs = 45000,
+  // tier 'lite' = Flash-Lite for simple jobs. thinking: how much the model "thinks" before answering
+  // (billed as output; the main cost). essential: still runs after the daily budget is spent.
+  tier = 'standard', thinking = 'low', essential = false,
+} = {}) {
   const key = cleanEnv(process.env.GEMINI_API_KEY);
   if (!key) return { ok: false, error: 'GEMINI_API_KEY is not set' };
+  if (!essential && await overBudget()) return { ok: false, error: `daily AI budget ($${DAILY_CAP_USD()}) reached; resumes at midnight` };
 
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -33,7 +46,9 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
   };
 
   let lastErr = 'no model responded';
-  for (const model of only ? [only] : MODELS) {
+  for (const model of only ? [only] : tier === 'lite' ? LITE : MODELS) {
+    if (thinking && !noThinking.has(model)) body.generationConfig.thinkingConfig = { thinkingLevel: thinking };
+    else delete body.generationConfig.thinkingConfig;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
@@ -46,6 +61,11 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
       clearTimeout(timer);
       const data = await res.json().catch(() => ({}));
       if (res.status === 404) { lastErr = `model ${model} not found`; continue; } // try next model
+      // A model that doesn't take a thinking level: send the call again without it, and stop sending it.
+      if (res.status === 400 && body.generationConfig.thinkingConfig && /thinking/i.test(data?.error?.message || '')) {
+        noThinking.add(model);
+        return generate(prompt, { json, temperature, maxTokens, model, timeoutMs, tier, thinking: null, essential });
+      }
       if (!res.ok) {
         return { ok: false, error: data?.error?.message || `HTTP ${res.status}` };
       }
@@ -72,9 +92,21 @@ export async function generate(prompt, { json = false, temperature = 0.2, maxTok
  */
 export function priceUsd(model, inTok, outTok, at = new Date()) {
   const pro = /pro/.test(model);
+  const lite = /lite/.test(model);
   const intro = at < new Date('2027-01-01T00:00:00Z');
-  const [pin, pout] = pro ? [2, 12] : intro ? [0.75, 3.75] : [1.5, 7.5];
+  const [pin, pout] = pro ? [2, 12] : lite ? [0.25, 1.5] : intro ? [0.75, 3.75] : [1.5, 7.5];
   return (inTok * pin + outTok * pout) / 1e6;
+}
+
+/** Has today's (IST) AI spend reached the daily cap? Checked at most once a minute. */
+async function overBudget() {
+  try {
+    const day = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+    if (spendCache.day !== day || Date.now() - spendCache.at > 60000) {
+      spendCache = { day, usd: (await aiCostForDay(day)).usd, at: Date.now() };
+    }
+    return spendCache.usd >= DAILY_CAP_USD();
+  } catch { return false; } // tracking trouble never blocks the work
 }
 
 /** Add one call to today's (IST) running total, for the daily report. Never fails a call. */
@@ -134,7 +166,7 @@ Rules: infer nothing that is not supported by the resume. Use "" or 0 or [] when
 ${text}
 ===RESUME END===`;
 
-  const r = await generate(prompt, { json: true, temperature: 0.1, maxTokens: 2048 });
+  const r = await generate(prompt, { json: true, temperature: 0.1, maxTokens: 2048, tier: 'lite', essential: true });
   if (!r.ok) return { ok: false, error: r.error };
   const data = extractJson(r.text);
   if (!data || typeof data !== 'object') return { ok: false, error: 'could not parse model output' };
