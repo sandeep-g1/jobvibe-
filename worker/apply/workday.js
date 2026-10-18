@@ -599,9 +599,9 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
       // again and any required field left empty is filled once more.
       const ask = [];
       const noGo = [];
-      for (let pass = 0; pass < 2; pass++) {
+      for (let pass = 0; pass < 4; pass++) { // answers can reveal more questions (Nasdaq export control)
       const fields = pass === 0 ? await readFields(page) : (await readFields(page)).filter((x) => !x.filled && x.required && x.type !== 'file');
-      if (pass === 1) {
+      if (pass >= 1) {
         if (!fields.length) break;
         log.push(`second pass on: ${fields.map((x) => x.label).join(', ').slice(0, 160)}`);
         ask.length = 0; // re-asked below only if still unanswerable

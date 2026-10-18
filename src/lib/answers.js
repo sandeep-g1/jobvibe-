@@ -330,7 +330,7 @@ export function answerQuestion(q, profile, ctx = {}) {
   if (/github|portfolio|website|personal (site|url)/.test(t)) return a.portfolio ? text(a.portfolio, 'portfolio') : (q.required ? { needsHuman: true, reason: 'portfolio link' } : { answer: '', source: 'optional, left blank' });
 
   // ---- sanctions checks ("located in / citizen of Cuba, Iran, North Korea…?"): from her nationality and city ----
-  if (SANCTIONED.test(t) && /locat|citizen|residen|nationalit|based/.test(t)) {
+  if (SANCTIONED.test(t)) { // any question naming a sanctioned place (citizen, resident, resided, lived, travelled, born…)
     if (!a.nationality) return { needsHuman: true, reason: 'nationality not set' };
     const home = COUNTRY_NAMES[(resolveChoice(profile.baseCity) || {}).cc] || '';
     return yesno(SANCTIONED.test(lc(`${a.nationality} ${home}`)), 'your nationality and city');
