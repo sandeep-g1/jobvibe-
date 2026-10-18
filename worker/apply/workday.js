@@ -419,23 +419,28 @@ async function fill(page, f, value, files) {
     }
     case 'dropdown': {
       const btn = box.locator('button[aria-haspopup="listbox"]').first();
-      await btn.click();
-      const all = await ownOptions(page, btn); // this dropdown's own list, never the skills suggestions
-      await all.first().waitFor({ timeout: 5000 });
-      // Exact text first: "No" must not land on "None" or "Not applicable".
-      const exact = all.filter({ hasText: new RegExp(`^\\s*${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }).first();
-      const opt = (await exact.count()) ? exact : all.filter({ hasText: String(value) }).first();
-      await opt.click().catch(() => {});
-      await page.waitForTimeout(500);
-      // Confirm the dropdown now shows the answer; if not, type it and press Enter (Workday lists
-      // select the highlighted match), then check again.
       const shows = async () => new RegExp(`\\b${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(await btn.innerText().catch(() => ''));
-      if (!(await shows())) {
+      // Lists can load slowly (Country after a refresh): open it up to 3 times, waiting for options.
+      for (let tryNo = 0; tryNo < 3 && !(await shows()); tryNo++) {
         await btn.click().catch(() => {});
-        await page.waitForTimeout(400);
-        await page.keyboard.type(String(value), { delay: 60 });
-        await page.keyboard.press('Enter');
-        await page.waitForTimeout(600);
+        const all = await ownOptions(page, btn); // the open list, never the skills suggestions
+        const has = await all.first().waitFor({ timeout: 6000 }).then(() => true).catch(() => false);
+        if (has) {
+          // Exact text first: "No" must not land on "None" or "Not applicable".
+          const exact = all.filter({ hasText: new RegExp(`^\\s*${String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') }).first();
+          const opt = (await exact.count()) ? exact : all.filter({ hasText: String(value) }).first();
+          await opt.click().catch(() => {});
+          await page.waitForTimeout(500);
+        }
+        // Still not showing: type it and press Enter (Workday lists select the highlighted match).
+        if (!(await shows())) {
+          if (!has) await btn.click().catch(() => {});
+          await page.waitForTimeout(400);
+          await page.keyboard.type(String(value), { delay: 60 });
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(700);
+        }
+        if (!(await shows())) { await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(1500); }
       }
       return shows();
     }
