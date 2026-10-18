@@ -716,13 +716,30 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
         }
         // Multi-select prompts take free text; map yes/no style answers onto real options where there are some.
         const value = f.options?.length && typeof r.answer !== 'boolean' ? (pickOption(r.answer, f.options) || r.answer) : r.answer;
-        const ok = await fill(page, f, value, files).catch((e) => { log.push(`${f.label}: ${e.message.split('\n')[0]}`); return false; });
+        let timedOut = false;
+        const ok = await fill(page, f, value, files).catch((e) => { timedOut = /timeout/i.test(e.message); log.push(`${f.label}: ${e.message.split('\n')[0]}`); return false; });
+        // A field that never answers usually means the page broke: stop here, the check below reloads.
+        if (timedOut && /something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page))) {
+          if (f.required) ask.push({ label: f.label, reason: 'page broke' });
+          break;
+        }
         if (ok) filled.push({ label: f.label, value: String(value).slice(0, 200), source: r.source });
         else if (f.required) ask.push({ label: f.label, reason: `couldn't set "${String(value).slice(0, 40)}"`, options: f.options || [], debug: `${f.type}; options [${(f.options || []).slice(0, 8).join(' / ')}]; tried "${String(value).slice(0, 40)}"` });
       }
       await page.waitForTimeout(800); // let Workday finish re-drawing before the second look
       }
       if (noGo.length && !job.override) return { status: 'ineligible', reasons: noGo, url };
+      // The page broke while being filled ("Something went wrong", or blank): the questions weren't
+      // the problem. Reload and do the step again, under the same rule as below.
+      if (ask.length && reloads < 6 && (/something went wrong[\s\S]{0,80}refresh/i.test(await bodyText(page))
+        || !(await page.locator('[data-automation-id="applyFlowPage"], [data-automation-id="progressBar"]').count()))) {
+        reloads++;
+        log.push(`Workday broke while filling "${stepName}" (reload ${reloads})`);
+        await page.waitForTimeout(4000 + reloads * 2000);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await page.waitForTimeout(5000);
+        continue;
+      }
       if (ask.length) {
         // What it saw, for the next fix: each field's type, options and why it stopped, plus a picture.
         return { status: 'needs_user', questions: [...asked, ...ask], url,
