@@ -529,7 +529,11 @@ export function answerQuestion(q, profile, ctx = {}) {
     if (!r.needsHuman || !a.degree) return r;
     // Lists name the level ("Master's", "Bachelor's"), not "Master's Degree" / "M.Com".
     const lvl = /master|m\.?\s?com|\bm\.?\s?a\b|m\.?\s?sc|mba/i.test(a.degree) ? 'Master' : /bachelor|b\.?\s?com|\bb\.?\s?a\b|b\.?\s?sc/i.test(a.degree) ? 'Bachelor' : null;
-    const o = lvl && opts.find((x) => new RegExp(`^${lvl}`, 'i').test(x));
+    // US-style lists (AA / AS / MA / MS / MBA): "Other" first; else the nearest true code
+    // (M.Com / accountancy / science → MS, arts → MA). Never MBA or another degree she lacks.
+    const near = lvl === 'Master' ? (/arts|\bm\.?\s?a\b/i.test(a.degree) ? /^(ma|m\.a\.?|master of arts)$/i : /^(ms|m\.s\.?|msc|master of science)$/i)
+      : lvl === 'Bachelor' ? (/arts|\bb\.?\s?a\b/i.test(a.degree) ? /^(ba|b\.a\.?|bachelor of arts)$/i : /^(bs|b\.s\.?|bsc|bachelor of science)$/i) : null;
+    const o = lvl && (opts.find((x) => new RegExp(`^${lvl}`, 'i').test(x)) || opts.find((x) => /^other\b/i.test(x)) || (near && opts.find((x) => near.test(x.trim()))));
     return o ? { answer: o, source: 'degree level' } : lvl ? { ...r, wanted: lvl } : r;
   }
   if (/field of study|major|discipline|specialization/.test(t)) {
