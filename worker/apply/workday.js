@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { answerQuestion, pickOption } from '../../src/lib/answers.js';
 import { draftAnswer } from '../../src/lib/essay.js';
+import { cvHistory } from '../../src/lib/cv-history.js';
 import { blocksEligibility, CONFIRM } from './run.js';
 
 const ID = (id) => `[data-automation-id="${id}"]`;
@@ -336,7 +337,7 @@ const readFields = (page) => page.evaluate(() => {
     else if (checks.length > 1) f = { type: 'checks', options: checks.map(optLabel), filled: checks.some((c) => c.checked) };
     else if (checks.length === 1) f = { type: 'checkbox', options: [optLabel(checks[0]) || label], filled: checks[0].checked };
     else if (area) f = { type: 'textarea', filled: !!area.value.trim() };
-    else if (date) f = { type: 'date', filled: [...box.querySelectorAll('input')].every((x) => x.value.trim()) };
+    else if (date) f = { type: 'date', filled: [...box.querySelectorAll('input')].every((x) => x.value.trim()), parts: box.querySelectorAll('input').length };
     else if (input) f = { type: 'text', filled: !!input.value.trim(), value: input.value };
     else return;
     out.push({ ...f, key, label, required, sel });
@@ -538,6 +539,37 @@ async function fill(page, f, value, files) {
   }
 }
 
+/**
+ * The CV-history value for a Work Experience / Education field, by Workday's field id and the
+ * section's position (Work Experience 2 = her second most recent role). undefined = not such a
+ * field; null = such a field with nothing on her CV for it (left as it is).
+ */
+function historyValue(f, history, fields) {
+  const onExperiencePage = fields.some((x) => /jobTitle|school/i.test(x.key) || /^job title$|^school or university$/i.test(x.label));
+  if (!onExperiencePage) return undefined;
+  const n = Number(String(f.sel).match(/nth=(\d+)/)?.[1] || 0);
+  const role = history.roles[n];
+  const edu = history.education[n];
+  const k = `${f.key} ${f.label}`.toLowerCase();
+  if (/jobtitle|job title/.test(k)) return role ? role.title : null;
+  if (/company/.test(k)) return role ? role.company : null;
+  if (/currentlywork|currently work/.test(k)) return role ? role.current : null;
+  if (/roledescription|role description/.test(k)) return null;
+  if (/school|university/.test(k)) return edu ? edu.school : null;
+  if (/firstyear|startyear/.test(k)) return edu ? `01/${edu.from}` : null;
+  if (/lastyear|endyear|graduat/.test(k)) return edu ? `01/${edu.to}` : null;
+  if (/startdate/.test(k)) return role ? role.from : null;
+  if (/enddate/.test(k)) return role ? role.to || null : null;
+  if (f.type === 'date' && /^(from|to)/.test(f.label.toLowerCase())) {
+    // Unknown ids: a month+year box is a job, a year-only box a degree.
+    const from = /^from/i.test(f.label);
+    if ((f.parts || 1) >= 2) return role ? (from ? role.from : role.to || null) : null;
+    return edu ? `01/${from ? edu.from : edu.to}` : null;
+  }
+  if (/location/.test(k) && f.type === 'text') return role ? role.location || null : null;
+  return undefined;
+}
+
 /* ---------------- the whole application ---------------- */
 
 /**
@@ -547,6 +579,7 @@ async function fill(page, f, value, files) {
  *   getVerifyLink    async (since) => url  read the verification link from the inbox
  */
 export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, dryRun = true, account = null, createAccount, getVerifyLink, getResetLink = null }) {
+  const history = cvHistory(cvText);
   const dir = join(tmpdir(), 'jobvibe-apply', safe(`${job.company}_${job.title}`));
   mkdirSync(dir, { recursive: true });
   const files = { cv: join(dir, cvName || 'Resume.docx') };
@@ -644,6 +677,17 @@ export async function applyWorkday({ browser, job, profile, cv, cvName, cvText, 
             }
             f.filled = !!(await box.locator('[data-automation-id="selectedItem"]').count());
           }
+        }
+        // Work Experience / Education sections: her real roles and degrees from the CV, never the
+        // generic rules (they put this job's title and an essay into Job Title / Company).
+        const h = historyValue(f, history, fields);
+        if (h !== undefined) {
+          if (h !== null && (pass === 0 || !f.filled)) {
+            const ok = await fill(page, f, h, files).catch(() => false);
+            if (ok) filled.push({ label: f.label, value: String(h), source: 'CV history' });
+            else if (f.required) ask.push({ label: f.label, reason: `couldn't set "${h}"`, debug: `${f.type} ${f.key}; tried "${h}"` });
+          }
+          continue;
         }
         if (f.filled && !isPhoneNumber) continue;
         if (f.type === 'file') { if (await fill(page, f, null, files)) filled.push({ label: f.label || 'Resume', value: '[file] CV', source: 'CV' }); continue; }
