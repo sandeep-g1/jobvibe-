@@ -497,13 +497,18 @@ async function main() {
   log(`worker started${DRY ? ' (dry run: nothing is submitted)' : ''}${ONCE ? ', single pass' : ''}${SKIP_ATS.size ? `, leaving ${[...SKIP_ATS].join('/')} jobs to another worker` : ''}`);
   if (ONCE) { await inboxTick(); await tick(browser); await inboxTick(); await browser.close(); return; }
   const codeAtStart = codeStamp();
+  const restartIfChanged = async () => {
+    if (codeStamp() > codeAtStart) { log('code updated: restarting with the new version'); await browser.close().catch(() => {}); process.exit(0); }
+  };
   for (;;) {
+    // Before the work too: a job queued right after a fix must not run on the old code.
+    await restartIfChanged();
     try { await tailorTick(); } catch (err) { log(`tailor requests failed: ${err.message}`); }
     try { await inboxTick(); } catch (err) { log(`inbox tick failed: ${err.message}`); }
     try { await tick(browser); } catch (err) { log(`tick failed: ${err.message}`); }
     // Code changed on disk (a fix was made): stop between jobs, so worker/always-on.ps1
     // starts the new version. Running Node never picks up edits by itself.
-    if (codeStamp() > codeAtStart) { log('code updated: restarting with the new version'); await browser.close().catch(() => {}); process.exit(0); }
+    await restartIfChanged();
     // 30-60 s between applications: about 25 a day fit easily, and employers aren't hit in bursts.
     await new Promise((r) => setTimeout(r, 30000 + Math.floor(Math.random() * 30000)));
   }
