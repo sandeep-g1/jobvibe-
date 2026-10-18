@@ -109,7 +109,8 @@ export function answerBankStatus(profile) {
 /*  Answering                                                          */
 /* ------------------------------------------------------------------ */
 
-const lc = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+// Accents dropped: Workday lists states as "Karnātaka", "Bihār" (RSM, Oct 2026).
+const lc = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 // Company name without legal suffixes, for "same employer?" checks ("Evergreen enterprises pvt ltd" → "evergreen").
 const normCo = (s) => lc(s).replace(/\b(private|pvt|limited|ltd|inc|llc|corp|corporation|co|company|enterprises?|technologies|technology|solutions|services|group|india)\b\.?/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
 
