@@ -161,3 +161,33 @@ export function missingProfile(p = {}, hasCv = false) {
   if (!(p.preferredLocations || []).filter(Boolean).length) miss.push('where you want to work');
   return miss;
 }
+
+/** The list fields of the settings form (skills, titles, places, filters, emails). */
+export const LIST_KEYS = FIELDS.filter((f) => f.type === 'list' || f.type === 'tags').map((f) => f.key);
+
+/**
+ * A settings form saved from a tab opened earlier must not undo changes made since elsewhere
+ * (a skill added on the dashboard). For each list: what the form sent, plus what was added
+ * elsewhere after the form loaded, minus what was removed elsewhere. Case-insensitive.
+ * @param saved    the profile as the form would save it
+ * @param current  the profile in the database now
+ * @param loaded   { key: list } as the form showed it when it loaded
+ */
+export function mergeListEdits(saved, current, loaded) {
+  const lc = (s) => String(s).trim().toLowerCase();
+  for (const k of LIST_KEYS) {
+    if (!Array.isArray(loaded?.[k]) || !Array.isArray(saved[k])) continue;
+    const was = new Set(loaded[k].map(lc));
+    const now = Array.isArray(current[k]) ? current[k] : [];
+    const nowSet = new Set(now.map(lc));
+    const addedElsewhere = now.filter((x) => !was.has(lc(x)));
+    const removedElsewhere = new Set(loaded[k].filter((x) => !nowSet.has(lc(x))).map(lc));
+    const out = [];
+    for (const x of [...saved[k], ...addedElsewhere]) {
+      if (removedElsewhere.has(lc(x)) || out.some((y) => lc(y) === lc(x))) continue;
+      out.push(x);
+    }
+    saved[k] = out;
+  }
+  return saved;
+}

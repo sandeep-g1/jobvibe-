@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   ROOT, initDB, toggleApplied, markApplied, latestRun, allRuns, runById, matchesForRun,
   appliedSet, isPostgres, saveProfileRow, getProfileRow,
-  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, emailTimeline, queueCv, requestTailoring, tailorRequest,
+  saveResume, resumeMeta, defaultResume, jobByFingerprint, activeProfiles, allProfiles, applicationsForUser, emailTimeline, queueCv, markSelfApplied, requestTailoring, tailorRequest,
 } from './db.js';
 import { cleanEnv } from './db/driver.js';
 import { buildRows, renderReport } from './report.js';
@@ -17,7 +17,7 @@ import { sendAppReports } from './app-report.js';
 import { secretStatus, saveSecret, loadSecretsIntoEnv, MANAGED, encrypt } from './lib/secrets.js';
 import { spawn } from 'node:child_process';
 import { availableQueryAdapters, BOARD_ADAPTERS } from './adapters/index.js';
-import { loadProfileAsync, FIELDS, normaliseProfile, missingProfile } from './lib/profile.js';
+import { loadProfileAsync, FIELDS, normaliseProfile, missingProfile, mergeListEdits } from './lib/profile.js';
 
 // Fields the onboarding confirm step shows (and is allowed to change).
 const REVIEW_KEYS = ['jobTitles', 'preferredLocations', 'workModes', 'totalExpYears', 'skillBank', 'stretchSkills'];
@@ -378,6 +378,11 @@ export async function handler(req, res) {
       return;
     }
 
+    // When the profile last changed: open pages refresh when it differs from what they show.
+    if (path === '/api/profile/stamp') {
+      return send(res, 200, 'application/json', JSON.stringify({ updatedAt: (await profile(uid))._updatedAt || null }));
+    }
+
     if (path === '/api/runs') {
       return send(res, 200, 'application/json', JSON.stringify(await allRuns(uid), null, 2));
     }
@@ -422,6 +427,15 @@ export async function handler(req, res) {
 
     if (path === '/applications') {
       return send(res, 200, 'text/html; charset=utf-8', applicationsPage(await applicationsForUser(uid), await emailTimeline(uid)));
+    }
+    // "I applied myself" (or Undo) on the Applications page.
+    const selfm = path.match(/^\/applications\/(\d+)\/self-applied$/);
+    if (selfm && req.method === 'POST') {
+      const form = await readForm(req);
+      const out = await markSelfApplied(Number(selfm[1]), uid, form.undo === '1');
+      if (out == null) return send(res, 404, 'text/html; charset=utf-8', notFoundPage('No such application.'));
+      res.writeHead(303, { Location: '/applications' });
+      return res.end();
     }
     const cvm = path.match(/^\/applications\/(\d+)\/cv$/);
     if (cvm) {
@@ -498,7 +512,11 @@ export async function handler(req, res) {
       const form = await readForm(req);
       const previous = await profile(uid);
       const merged = normaliseProfile(form, previous);
+      // Keep what other tabs changed since this form loaded (a skill added on the dashboard).
+      let loaded = null; try { loaded = JSON.parse(form._loaded || 'null'); } catch { /* old form */ }
+      if (loaded) mergeListEdits(merged, previous, loaded);
       merged.userId = uid;
+      delete merged._source; delete merged._updatedAt;
       await saveProfileRow(merged, uid);
       res.writeHead(303, { Location: '/settings?saved=1' });
       return res.end();

@@ -1,10 +1,13 @@
+// Statuses where she may have applied on her own: offer "I applied myself" there.
+const SELF_OK = ['manual', 'needs_user', 'captcha', 'email_code', 'failed', 'held', 'blocked', 'waiting', 'skipped', 'closed', 'dry_run', 'ineligible', 'queued'];
+
 // Applications: every job the user approved, where it stands, how the agent
 // applies (or why it can't), and the tailored CV it used.
 import { layout, esc } from './pages.js';
 import { COUNTRY_NAMES } from '../lib/geo.js';
 
 const STATUS = {
-  submitted: ['✓ Applied', 'ok'], unconfirmed: ['Submitted, not confirmed', 'warn'], needs_user: ['Needs your answer', 'warn'],
+  submitted: ['✓ Applied', 'ok'], self_applied: ['✓ Applied by you', 'ok'], unconfirmed: ['Submitted, not confirmed', 'warn'], needs_user: ['Needs your answer', 'warn'],
   captcha: ['Finish it (CAPTCHA)', 'warn'], manual: ['Apply yourself', 'muted'], waiting: ['⚡ Auto-apply soon', 'info'],
   blocked: ['Waiting on your answers', 'warn'], queued: ['Queued', 'info'], running: ['Applying…', 'info'],
   failed: ['Failed', 'bad'], skipped: ['Skipped', 'muted'], dry_run: ['Test run (not submitted)', 'muted'],
@@ -54,7 +57,9 @@ export function applicationsPage(rows, timeline = []) {
       <td>${esc(place) || '—'}</td>
       <td>${r.score != null ? `${Math.round(r.score)}%` : '—'}</td>
       <td>${how}</td>
-      <td><span class="tag ${cls}">${esc(label)}</span>${r.attempts > 1 ? `<div class="sub">${r.attempts} attempts</div>` : ''}</td>
+      <td><span class="tag ${cls}">${esc(label)}</span>${r.attempts > 1 ? `<div class="sub">${r.attempts} attempts</div>` : ''}
+        ${SELF_OK.includes(r.status) ? `<form method="POST" action="/applications/${r.id}/self-applied" class="selfform"><button class="selfbtn" type="submit">✓ I applied myself</button></form>` : ''}
+        ${r.status === 'self_applied' ? `<form method="POST" action="/applications/${r.id}/self-applied" class="selfform"><input type="hidden" name="undo" value="1"><button class="undobtn" type="submit">Undo</button></form>` : ''}</td>
       <td class="note">${note || '<span class="sub">—</span>'}</td>
       <td>${r.has_cv ? `<a class="dl" href="/applications/${r.id}/cv">⬇ ${esc(r.cv_name || 'CV')}</a>` : '<span class="sub">—</span>'}</td>
       <td class="sub">${esc(when(r.updated_at))}</td>
@@ -80,7 +85,8 @@ export function applicationsPage(rows, timeline = []) {
   ${loose.length ? `<div class="card" style="margin-top:16px"><h3 style="margin:0 0 8px">Recruiter emails not tied to an application</h3>${loose.map((e) =>
     `${e.dir === 'in' ? `<div class="sub" style="margin-top:8px"><b>${esc(e.company || '')}</b></div>` : ''}${threadLine(e)}`).join('')}</div>` : ''}
   <p class="muted" style="margin-top:12px">⚡ Auto-apply: the agent fills and submits the employer's own form with your tailored CV.
-    ✋ You apply: the site blocks automated applications or needs your account; the tailored CV is still prepared for you.</p>
+    ✋ You apply: the site blocks automated applications or needs your account; the tailored CV is still prepared for you.
+    Applied to one yourself? Click “✓ I applied myself”: it counts as applied in your reports and that job isn't suggested again.</p>
 </div>
 <style>
   .apps { width:100%; border-collapse:collapse; min-width:980px; }
@@ -93,6 +99,8 @@ export function applicationsPage(rows, timeline = []) {
   .tag.info { background:#eef4fc; color:#0a66c2; } .tag.muted { background:#f2f4f8; color:#667085; }
   .mail { font-size:.74rem; margin-top:4px; color:#475467; } .mail.out { color:#15803d; }
   .dl { font-size:.78rem; font-weight:600; white-space:nowrap; }
+  .selfform { margin-top:6px; } .selfbtn { font:inherit; font-size:.74rem; font-weight:700; padding:3px 9px; border-radius:10px; border:1px solid #86efac; background:#f0fdf4; color:#15803d; cursor:pointer; white-space:nowrap; }
+  .selfbtn:hover { background:#dcfce7; } .undobtn { font:inherit; font-size:.72rem; border:0; background:none; color:#8a94a6; text-decoration:underline; cursor:pointer; padding:0; }
 </style>`,
   });
 }

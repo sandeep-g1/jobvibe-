@@ -69,7 +69,7 @@ function friendly(r) {
   // A note that only repeats the status ("the employer has closed this job") adds nothing.
   return WORDS[r.status] && text.toLowerCase().includes(WORDS[r.status].toLowerCase().replace(/^the /, '')) ? '' : text;
 }
-const appliedByUser = (r) => r.status === 'manual' && /applied (herself|himself|themselves|yourself)/i.test(r.reason || '');
+const appliedByUser = (r) => r.status === 'self_applied' || r.status === 'manual' && /applied (herself|himself|themselves|yourself)/i.test(r.reason || '');
 
 /** Build one user's report. Returns null when there is nothing to report. */
 export function buildAppReport({ name, rows: all, emails, sent = [], cost = null }) {

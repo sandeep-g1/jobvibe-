@@ -158,7 +158,10 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
       missCount.set(sk, (missCount.get(sk) || 0) + 1);
     }
   }
-  const topGaps = [...missCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  // Skills she has added since those jobs were scored are hers now: never listed as missing.
+  const have = new Set((profile.skillBank || []).map((k) => String(k).trim().toLowerCase()));
+  const topGaps = [...missCount.entries()].filter(([k]) => !have.has(String(k).trim().toLowerCase()))
+    .sort((a, b) => b[1] - a[1]).slice(0, 12);
 
   const recMap = Object.fromEntries(s.byRec.map((r) => [r.r, r.c]));
   const maxSrc = Math.max(1, ...s.bySource.map((r) => r.c));
@@ -303,6 +306,7 @@ export async function dashboardPage(profile, sourceStatus, userId = 'local', use
     </div>
   </div>
 </div>
+<input type="hidden" id="profileStamp" value="${esc(profile._updatedAt || '')}">
 ${DASH_SCRIPT}`;
 
   return layout({ title: `${esc(profile.name)} — Dashboard`, active: 'dash', body, navExtra: userChip(user) });
@@ -335,6 +339,16 @@ function gapChip(k, n) {
 }
 
 const DASH_SCRIPT = `<script>
+// Changed in another tab (Search Settings): show the latest when this tab is looked at again.
+async function profileStamp(){ try { return (await (await fetch('/api/profile/stamp',{cache:'no-store'})).json()).updatedAt; } catch(e){ return null; } }
+async function syncCheck(){
+  if (document.hidden) return;
+  var el = document.getElementById('profileStamp'); var now = await profileStamp();
+  if (el && now && el.value && now !== el.value) location.reload();
+}
+document.addEventListener('visibilitychange', syncCheck); window.addEventListener('focus', syncCheck);
+// This tab's own changes are already on screen: take the new stamp without reloading.
+async function ownChange(){ var el = document.getElementById('profileStamp'); var now = await profileStamp(); if (el && now) el.value = now; }
 function chipEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 async function delSkill(btn){
   var chip = btn.closest('.chip'); var skill = chip.getAttribute('data-skill');
@@ -342,7 +356,7 @@ async function delSkill(btn){
   try {
     var r = await fetch('/api/skills/remove',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'skill='+encodeURIComponent(skill)});
     var j = await r.json();
-    if (j.ok) { chip.style.transition='opacity .2s'; chip.style.opacity='0'; setTimeout(function(){chip.remove();},200); }
+    if (j.ok) { ownChange(); chip.style.transition='opacity .2s'; chip.style.opacity='0'; setTimeout(function(){chip.remove();},200); }
     else btn.disabled=false;
   } catch(e){ btn.disabled=false; }
 }
@@ -353,6 +367,7 @@ async function addGap(btn){
     var r = await fetch('/api/skills/add',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'skill='+encodeURIComponent(skill)});
     var j = await r.json();
     if (j.ok) {
+      ownChange();
       var bank = document.getElementById('skillBank');
       if (bank && j.added) {
         var s = document.createElement('span');

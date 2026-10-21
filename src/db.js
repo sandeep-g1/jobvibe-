@@ -461,7 +461,7 @@ export async function claimDestination(id, userId, key) {
   const other = await d.one(
     `SELECT q.id, q.status, j.title, j.company FROM apply_queue q
        JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
-      WHERE q.user_id = ? AND q.dest_key = ? AND q.id != ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'running')`,
+      WHERE q.user_id = ? AND q.dest_key = ? AND q.id != ? AND q.status IN ('submitted', 'self_applied', 'unconfirmed', 'captcha', 'running')`,
     [userId, key, id]);
   if (other) return other;
   await d.run('UPDATE apply_queue SET dest_key = ? WHERE id = ?', [key, id]);
@@ -483,7 +483,7 @@ export async function recentApplicationAt(userId, company, exceptId = 0, days = 
   const rows = await d.query(
     `SELECT q.id, q.status, q.updated_at, j.title, j.company FROM apply_queue q
        JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
-      WHERE q.user_id = ? AND q.id != ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
+      WHERE q.user_id = ? AND q.id != ? AND q.status IN ('submitted', 'self_applied', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
     [userId, exceptId, new Date(Date.now() - days * 86400000).toISOString()]);
   return rows.find((r) => coKey(r.company) === key) || null;
 }
@@ -493,7 +493,7 @@ export async function recentlyAppliedCompanies(userId, days = 60) {
   const d = await db();
   const rows = await d.query(
     `SELECT DISTINCT j.company FROM apply_queue q JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
-      WHERE q.user_id = ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
+      WHERE q.user_id = ? AND q.status IN ('submitted', 'self_applied', 'unconfirmed', 'captcha', 'email_code') AND q.updated_at > ?`,
     [userId, new Date(Date.now() - days * 86400000).toISOString()]);
   return new Set(rows.map((r) => coKey(r.company)).filter(Boolean));
 }
@@ -706,7 +706,7 @@ export async function applicationsForMatching(userId) {
   return d.query(
     `SELECT q.id, q.status, q.detail, q.fingerprint, j.company, j.title FROM apply_queue q
        JOIN job_matches m ON m.id = q.match_id JOIN jobs j ON j.id = m.job_id
-      WHERE q.user_id = ? AND q.status IN ('submitted', 'unconfirmed', 'captcha', 'manual', 'needs_user')`, [userId]);
+      WHERE q.user_id = ? AND q.status IN ('submitted', 'self_applied', 'unconfirmed', 'captcha', 'manual', 'needs_user')`, [userId]);
 }
 
 /* ---------------- applications ---------------- */
@@ -722,6 +722,32 @@ export async function toggleApplied(fingerprint, userId = 'local') {
   await d.run('INSERT INTO applications (user_id, fingerprint, status, applied_at) VALUES (?,?,?,?)',
     [userId, fingerprint, 'applied', now()]);
   return { applied: true };
+}
+
+/**
+ * "I applied myself" on the Applications page: status self_applied, and the job is marked
+ * applied (never suggested again). undo puts back the status it had. Owner-scoped.
+ * @returns the updated row's status, or null if it isn't this user's application.
+ */
+export async function markSelfApplied(queueId, userId, undo = false) {
+  const d = await db();
+  const q = await d.one('SELECT id, status, reason, detail, fingerprint FROM apply_queue WHERE id = ? AND user_id = ?', [queueId, userId]);
+  if (!q) return null;
+  let det = {}; try { det = JSON.parse(q.detail || '{}') || {}; } catch { /* none */ }
+  if (!undo) {
+    if (q.status === 'self_applied' || q.status === 'submitted') return q.status;
+    det.before = { status: q.status, reason: q.reason };
+    det.selfAppliedAt = now();
+    await updateQueueItem(q.id, { status: 'self_applied', reason: 'You applied yourself.', detail: JSON.stringify(det) });
+    if (q.fingerprint) await markApplied(q.fingerprint, userId);
+    return 'self_applied';
+  }
+  if (q.status !== 'self_applied') return q.status;
+  const before = det.before || { status: 'manual', reason: null };
+  delete det.before; delete det.selfAppliedAt;
+  await updateQueueItem(q.id, { status: before.status, reason: before.reason, detail: JSON.stringify(det) });
+  if (q.fingerprint) await d.run('DELETE FROM applications WHERE user_id = ? AND fingerprint = ?', [userId, q.fingerprint]);
+  return before.status;
 }
 
 /** Idempotently mark a job applied (used by the one-click apply flow). */
