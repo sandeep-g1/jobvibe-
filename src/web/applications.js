@@ -26,6 +26,57 @@ const day = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'nu
 const threadLine = (e) => `<div class="mail ${e.dir}">${esc(day(e.at))} · ${esc(e.dir === 'in' ? `${IN[e.kind] || 'Email'}: ${e.text || ''}` : OUT[e.kind](e))}</div>`;
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+/** "Bengaluru, India" / "Remote, India". */
+const placeOf = (r) => [r.city ? r.city.replace(/\b\w/g, (c) => c.toUpperCase()) : (r.work_mode === 'Remote' ? 'Remote' : ''), COUNTRY_NAMES[r.country] || '']
+  .filter(Boolean).join(', ');
+
+// Filter and sort in the browser: instant, and the choices are remembered on this device.
+const FILTER_SCRIPT = `<script>
+(function () {
+  var tbody = document.querySelector('table.apps tbody');
+  var rows = [].slice.call(document.querySelectorAll('tr.app-row'));
+  if (!tbody || !rows.length) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var chips = [].slice.call(document.querySelectorAll('.chip-filter'));
+  var state = { text: '', place: '', when: '', sort: 'updated-desc', status: '' };
+  try { var saved = JSON.parse(localStorage.getItem('appFilters') || 'null'); if (saved) state = Object.assign(state, saved); } catch (e) { /* none */ }
+  function save() { try { localStorage.setItem('appFilters', JSON.stringify(state)); } catch (e) { /* private window */ } }
+  function show() {
+    $('fText').value = state.text; $('fPlace').value = state.place; $('fWhen').value = state.when; $('fSort').value = state.sort;
+    if ($('fPlace').value !== state.place) state.place = $('fPlace').value; // a location no longer listed
+    chips.forEach(function (c) { c.classList.toggle('on', c.getAttribute('data-status') === state.status); });
+    var q = state.text.trim().toLowerCase();
+    var since = state.when ? Date.now() - Number(state.when) * 86400000 : 0;
+    var shown = 0;
+    rows.forEach(function (r) {
+      var d = r.dataset;
+      var ok = (!q || d.title.indexOf(q) >= 0 || d.company.indexOf(q) >= 0)
+        && (!state.place || d.place === state.place)
+        && (!state.status || d.status === state.status)
+        && (!since || Date.parse(d.updated || d.created) >= since);
+      r.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var parts = state.sort.split('-'), key = parts[0], dir = parts[1] === 'asc' ? 1 : -1;
+    rows.slice().sort(function (a, b) {
+      var x = a.dataset, y = b.dataset;
+      if (key === 'score') return (Number(x.score) - Number(y.score)) * dir || (Date.parse(y.updated) - Date.parse(x.updated));
+      if (key === 'updated') return ((Date.parse(x.updated) || 0) - (Date.parse(y.updated) || 0)) * dir;
+      return x[key].localeCompare(y[key]) * dir;
+    }).forEach(function (r) { tbody.appendChild(r); });
+    $('fCount').textContent = shown === rows.length ? rows.length + ' applications' : shown + ' of ' + rows.length + ' shown';
+  }
+  $('fText').addEventListener('input', function () { state.text = this.value; save(); show(); });
+  $('fPlace').addEventListener('change', function () { state.place = this.value; save(); show(); });
+  $('fWhen').addEventListener('change', function () { state.when = this.value; save(); show(); });
+  $('fSort').addEventListener('change', function () { state.sort = this.value; save(); show(); });
+  chips.forEach(function (c) { c.addEventListener('click', function () {
+    var s = c.getAttribute('data-status'); state.status = state.status === s ? '' : s; save(); show();
+  }); });
+  $('fClear').addEventListener('click', function () { state = { text: '', place: '', when: '', sort: 'updated-desc', status: '' }; save(); show(); });
+  show();
+})();
+</script>`;
 
 export function applicationsPage(rows, timeline = []) {
   const byApp = new Map();
@@ -34,14 +85,15 @@ export function applicationsPage(rows, timeline = []) {
   const counts = {};
   for (const r of rows) counts[r.status] = (counts[r.status] || 0) + 1;
   const chips = Object.entries(counts).sort((a, b) => b[1] - a[1])
-    .map(([s, n]) => `<span class="hero-chip">${esc((STATUS[s] || [s])[0])}: ${n}</span>`).join('');
+    // Click a chip to show only that status (click again for all).
+    .map(([s, n]) => `<button type="button" class="hero-chip chip-filter" data-status="${esc(s)}">${esc((STATUS[s] || [s])[0])}: ${n}</button>`).join('');
+  const places = [...new Set(rows.map((r) => placeOf(r)).filter(Boolean))].sort();
 
   const body = rows.length ? rows.map((r) => {
     let route = null; try { route = JSON.parse(r.apply_route || 'null'); } catch { /* none */ }
     const det = (() => { try { return JSON.parse(r.detail || '{}'); } catch { return {}; } })();
     const [label, cls] = STATUS[r.status] || [r.status, 'muted'];
-    const place = [r.city ? r.city.replace(/\b\w/g, (c) => c.toUpperCase()) : (r.work_mode === 'Remote' ? 'Remote' : ''), COUNTRY_NAMES[r.country] || '']
-      .filter(Boolean).join(', ');
+    const place = placeOf(r);
     const how = route?.route === 'auto'
       ? `<span class="tag info">⚡ Auto-apply</span><div class="sub">${esc(route.via === 'job link' ? `${route.ats} form` : route.via || route.ats || '')}</div>`
         + (route.posting ? `<div class="sub">${esc(route.posting.title)} · ${esc(route.posting.location)}</div>` : '')
@@ -52,7 +104,9 @@ export function applicationsPage(rows, timeline = []) {
     const note = [thread.length ? '' : det.lastEmail ? EMAIL[det.lastEmail] : '', r.reason && !['submitted'].includes(r.status) ? r.reason : '',
       r.status === 'submitted' && det.evidence?.text ? `Site said: “${det.evidence.text}”` : '']
       .filter(Boolean).map(esc).join('<br>') + thread.map(threadLine).join('');
-    return `<tr>
+    return `<tr class="app-row" data-status="${esc(r.status)}" data-score="${r.score != null ? Math.round(r.score) : -1}"
+      data-title="${esc(String(r.title || '').toLowerCase())}" data-company="${esc(String(r.company || '').toLowerCase())}"
+      data-place="${esc(place)}" data-updated="${esc(r.updated_at || '')}" data-created="${esc(r.created_at || '')}">
       <td><a href="${esc(r.final_url || r.apply_url)}" target="_blank" rel="noopener"><b>${esc(r.title)}</b></a><div class="sub">${esc(r.company)}</div></td>
       <td>${esc(place) || '—'}</td>
       <td>${r.score != null ? `${Math.round(r.score)}%` : '—'}</td>
@@ -76,6 +130,21 @@ export function applicationsPage(rows, timeline = []) {
   <div class="hero-chips">${chips || '<span class="hero-chip">none yet</span>'}</div>
 </div>
 <div class="wrap">
+  <div class="card filters">
+    <input id="fText" type="search" placeholder="Search job title or company…">
+    <select id="fPlace"><option value="">All locations</option>${places.map((p) => `<option>${esc(p)}</option>`).join('')}</select>
+    <select id="fWhen">
+      <option value="">Any date</option><option value="1">Today</option><option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option><option value="90">Last 90 days</option>
+    </select>
+    <select id="fSort">
+      <option value="updated-desc">Sort: newest first</option><option value="updated-asc">Oldest first</option>
+      <option value="score-desc">Best match first</option><option value="score-asc">Lowest match first</option>
+      <option value="company-asc">Company A–Z</option><option value="title-asc">Job title A–Z</option>
+    </select>
+    <span id="fCount" class="sub"></span>
+    <button type="button" id="fClear" class="clearbtn">Clear</button>
+  </div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="apps">
       <thead><tr><th>Job</th><th>Location</th><th>Match</th><th>How it applies</th><th>Status</th><th>Details</th><th>CV sent</th><th>Updated</th></tr></thead>
@@ -99,6 +168,15 @@ export function applicationsPage(rows, timeline = []) {
   .tag.info { background:#eef4fc; color:#0a66c2; } .tag.muted { background:#f2f4f8; color:#667085; }
   .mail { font-size:.74rem; margin-top:4px; color:#475467; } .mail.out { color:#15803d; }
   .dl { font-size:.78rem; font-weight:600; white-space:nowrap; }
+  .filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; padding:12px 14px; }
+  .filters input, .filters select { font:inherit; font-size:.85rem; padding:7px 10px; border:1px solid #d0d5dd; border-radius:8px; background:#fff; color:inherit; }
+  .filters input { flex:1 1 220px; min-width:0; }
+  .clearbtn { font:inherit; font-size:.8rem; border:0; background:none; color:#0a66c2; cursor:pointer; padding:4px; }
+  .chip-filter { font-family:inherit; cursor:pointer; border:1px solid transparent; }
+  .chip-filter.on { background:#fff; color:#0a66c2; font-weight:700; }
+</style>
+${FILTER_SCRIPT}
+<style>
   .selfform { margin-top:6px; } .selfbtn { font:inherit; font-size:.74rem; font-weight:700; padding:3px 9px; border-radius:10px; border:1px solid #86efac; background:#f0fdf4; color:#15803d; cursor:pointer; white-space:nowrap; }
   .selfbtn:hover { background:#dcfce7; } .undobtn { font:inherit; font-size:.72rem; border:0; background:none; color:#8a94a6; text-decoration:underline; cursor:pointer; padding:0; }
 </style>`,
